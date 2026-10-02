@@ -1,0 +1,31 @@
+command:
+  - "streamlit"
+  - "run"
+  - "app.py"
+
+env:
+  # Caminho do Volume do Unity Catalog onde os dossies e PDFs ficam salvos.
+  - name: "SENTINELA_DATA_DIR"
+    value: "/Volumes/main/sentinela/dossies"
+
+  # --- Configuracao da IA (opcional) -------------------------------------
+  # Necessaria apenas para o preenchimento automatico. Remova os blocos
+  # abaixo se nao for usar essa funcionalidade.
+
+  # Credencial: key da Anthropic (sk-ant-...) OU key do proxy LiteLLM.
+  - name: "ANTHROPIC_API_KEY"
+    valueFrom: "anthropic-api-key"
+
+  # Endereco do servico. Defina com o endereco do LiteLLM da empresa.
+  # REMOVA esta linha se for usar a API da Anthropic direta.
+  - name: "ANTHROPIC_BASE_URL"
+    value: "https://<endereco-do-litellm-da-empresa>"
+
+  # Nome do modelo. No proxy pode ser diferente do nome oficial.
+  - name: "SENTINELA_LLM_MODELO"
+    value: "claude-sonnet-4-6"
+
+  # Formato da rota: "openai" (/v1/chat/completions) ou "anthropic"
+  # (/v1/messages). Se omitido, o app escolhe automaticamente.
+  # - name: "SENTINELA_LLM_FORMATO"
+  #   value: "openai"
