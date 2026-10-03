@@ -216,3 +216,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Dados locais do Banco de Dossiês (SENTINELA_DATA_DIR=./data)
+data/

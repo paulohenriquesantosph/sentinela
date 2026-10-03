@@ -16,14 +16,14 @@ env:
   - name: "ANTHROPIC_API_KEY"
     valueFrom: "anthropic-api-key"
 
-  # Endereco do servico. Defina com o endereco do LiteLLM da empresa.
+  # Endereco do servico: gateway LiteLLM do Nubank (conforme o manual, secao 13).
   # REMOVA esta linha se for usar a API da Anthropic direta.
   - name: "ANTHROPIC_BASE_URL"
-    value: "https://<endereco-do-litellm-da-empresa>"
+    value: "https://litellm.data.nubank.world"
 
-  # Nome do modelo. No proxy pode ser diferente do nome oficial.
+  # Nome do modelo no gateway (no proxy costuma ter o prefixo do provedor).
   - name: "SENTINELA_LLM_MODELO"
-    value: "claude-sonnet-4-6"
+    value: "anthropic/claude-sonnet-4-6"
 
   # Formato da rota: "openai" (/v1/chat/completions) ou "anthropic"
   # (/v1/messages). Se omitido, o app escolhe automaticamente.

@@ -1,44 +1,39 @@
 # -*- coding: utf-8 -*-
 """
-Sentinela PLD - Núcleo de lógica (Databricks) - v2 (completo)
-================================================================
+Sentinela PLD - Núcleo de lógica (Databricks)
+=============================================
 
-Módulo com TODA a lógica de negócio, sem depender de UI:
-- Modelo de dados completo do caso (KYC PF/PJ, sócios, contrapartes de
-  crédito/débito, Thundera - AML 360, resolução, scorecard de qualidade)
-- Armazenamento do Banco de Dossiês
-- Preenchimento automático via IA (API da Anthropic)
-- Geração de gráfico de timeline (matplotlib)
-- Geração do PDF do dossiê (reportlab)
+Módulo com a lógica de negócio que não depende de interface:
 
-Ver app.py para a interface (Streamlit) que usa estas funções, e README.md
-para instruções de deploy no Databricks.
+- modelo de dados do caso (KYC PF/PJ, sócios, contrapartes de crédito/débito,
+  Thundera - AML 360, resolução e avaliação de qualidade);
+- cálculo da nota de qualidade (desconto por CATEGORIA, igual ao artefato);
+- classificação de risco geral do caso;
+- narrativa de "mudança de comportamento" e gráfico da timeline;
+- validação dos campos obrigatórios;
+- armazenamento do Banco de Dossiês (arquivos JSON + PDF num Volume).
+
+A chamada de IA fica em ia.py e a geração do PDF em pdf_dossie.py.
+A interface (Streamlit) está em app.py / estilo.py.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import random
 import re
+import tempfile
+import time
 import uuid
-from dataclasses import dataclass, field, asdict
-from datetime import datetime
+from contextlib import contextmanager
+from dataclasses import dataclass, field, asdict, fields
+from datetime import date, datetime, timedelta
 from io import BytesIO
-from typing import Any, Dict, List, Optional
-
-import requests
-from reportlab.lib import colors
-from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.units import cm
-from reportlab.platypus import (
-    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable, Image as RLImage,
-)
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from opcoes import (
-    RAZOES_CLEAR, RAZOES_CANCELAMENTO, JURISPRUDENCIA_NUPAGAMENTOS,
-    JURISPRUDENCIA_REPORTAR_NUINVEST, JURISPRUDENCIA_REPORTAR_CANCELAR_NUINVEST,
-    SCORECARD_NUPAG, SCORECARD_NUINVEST,
+    DILIGENCIAS, SCORECARD_NUPAG, SCORECARD_NUINVEST,
 )
 
 # ---------------------------------------------------------------------------
@@ -46,7 +41,10 @@ from opcoes import (
 # ---------------------------------------------------------------------------
 
 TIPOS_CASO = ["Pessoa Física (PF)", "Pessoa Jurídica (PJ)", "Cripto", "NuInvest", "Under 18"]
-DILIGENCIAS = ["Clear (arquivar)", "Reportar", "Reportar e Cancelar"]
+TIPO_PJ = "Pessoa Jurídica (PJ)"
+TIPO_UNDER18 = "Under 18"
+TIPO_NUINVEST = "NuInvest"
+
 TIPOS_REGIAO_RISCO_1 = [
     "Região de Fronteira",
     "Região de Extração Mineral e/ou de Extração de Madeira",
@@ -58,23 +56,129 @@ TIPOS_OUTRAS_MOV = [
     "Saques", "Boletos", "Gastos Cartão de Crédito", "Gastos Cartão de Débito",
     "Empréstimos", "Criptomoedas", "Investimentos", "Outros",
 ]
-REGIOES_RISCO_ALTO = {"Irã", "Coreia do Norte", "Síria", "Afeganistão", "Iêmen", "Mianmar", "Rússia"}
+OPCOES_EVASAO = ["", "Rápida Evasão", "Sem Rápida Evasão"]
+
+# Seções da aba Resolução do Caso (cada uma tem o seu próprio "Salvar").
+SECOES_RESOLUCAO = ["parecer", "alineas", "jurisprudencias", "razoes_clear",
+                    "razoes_cancelamento", "diligencia"]
+
+NEUTRO = "Não informado"
+
+NOMES_MESES = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho",
+               "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"]
+
+# Valores-base dos cinco meses que antecedem o início do período, na narrativa
+# de mudança de comportamento (iguais ao artefato original).
+VALORES_BASE_MUDANCA = ["R$1.000,00", "R$1.500,00", "R$2.000,00", "R$0,00", "R$0,10"]
+
+_NUMERO_CASO_RE = re.compile(r"^[0-9A-Za-z][0-9A-Za-z_-]{0,40}$")
 
 
-def classificar_risco_contraparte(pep: bool, regiao_risco: str) -> str:
-    if pep:
-        return "ALTO"
-    if regiao_risco and regiao_risco.strip() in REGIOES_RISCO_ALTO:
-        return "ALTO"
-    if regiao_risco and regiao_risco.strip().lower() not in ("", "brasil", "brazil"):
-        return "MÉDIO"
-    return "BAIXO"
+def agora_iso() -> str:
+    return datetime.now().isoformat(timespec="seconds")
 
 
 def gerar_numero_caso() -> str:
-    ano = datetime.now().year
-    sufixo = uuid.uuid4().hex[:6].upper()
-    return f"{ano}-{sufixo}"
+    """Número do caso no formato da versão Databricks: ano + 6 caracteres (2026-8058FB)."""
+    return f"{datetime.now().year}-{uuid.uuid4().hex[:6].upper()}"
+
+
+def numero_caso_valido(numero: str) -> bool:
+    """Evita que um número de caso malformado vire caminho de arquivo."""
+    return bool(numero and _NUMERO_CASO_RE.match(numero))
+
+
+# ---------------------------------------------------------------------------
+# Valores monetários e datas
+# ---------------------------------------------------------------------------
+
+def parse_valor_br(valor_str: Any) -> float:
+    """Converte 'R$1.234,56', '1.234,56', '500 mil', '1,5 milhão'... em float.
+    Retorna 0.0 se não conseguir interpretar."""
+    if valor_str is None:
+        return 0.0
+    if isinstance(valor_str, (int, float)):
+        return float(valor_str)
+    texto = str(valor_str).strip().lower()
+    if not texto:
+        return 0.0
+    multiplicador = 1.0
+    if re.search(r"\bmilh(ão|ao|ões|oes)\b", texto):
+        multiplicador = 1_000_000.0
+    elif re.search(r"\bmil\b", texto):
+        multiplicador = 1_000.0
+    limpo = re.sub(r"[^\d,.\-]", "", texto)
+    if not re.search(r"\d", limpo):
+        return 0.0
+    if "," in limpo:
+        limpo = limpo.replace(".", "").replace(",", ".")
+    elif re.fullmatch(r"-?\d{1,3}(\.\d{3})+", limpo):
+        limpo = limpo.replace(".", "")
+    try:
+        return float(limpo) * multiplicador
+    except ValueError:
+        return 0.0
+
+
+# Nome antigo, usado por app.py da versão anterior.
+_parse_valor_br = parse_valor_br
+
+
+def formatar_brl(valor: float) -> str:
+    """1234.5 -> 'R$1.234,50' (mesmo padrão dos exemplos do artefato)."""
+    inteiro = f"{abs(valor):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    return ("-" if valor < 0 else "") + "R$" + inteiro
+
+
+def normalizar_valor_texto(texto: Any) -> str:
+    """Se o texto é um valor monetário, devolve no formato R$1.234,56; senão, o texto original."""
+    bruto = "" if texto is None else str(texto).strip()
+    if not bruto:
+        return ""
+    valor = parse_valor_br(bruto)
+    if valor == 0.0 and not re.search(r"\d", bruto):
+        return bruto
+    return formatar_brl(valor)
+
+
+def parse_data_br(texto: str) -> Optional[date]:
+    m = re.search(r"(\d{1,2})/(\d{1,2})/(\d{4})", texto or "")
+    if not m:
+        return None
+    try:
+        return date(int(m.group(3)), int(m.group(2)), int(m.group(1)))
+    except ValueError:
+        return None
+
+
+def formatar_data_br(d: date) -> str:
+    return d.strftime("%d/%m/%Y")
+
+
+def somar_meses(d: date, meses: int) -> date:
+    indice = d.year * 12 + (d.month - 1) + meses
+    ano, mes = divmod(indice, 12)
+    return date(ano, mes + 1, 1)
+
+
+def parse_periodo(periodo: str) -> Optional[Tuple[date, date]]:
+    """'01/04/2026 até 30/09/2026' -> (date, date). None se não houver duas datas válidas."""
+    datas = re.findall(r"\d{1,2}/\d{1,2}/\d{4}", periodo or "")
+    if len(datas) < 2:
+        return None
+    ini, fim = parse_data_br(datas[0]), parse_data_br(datas[1])
+    if not ini or not fim or fim < ini:
+        return None
+    return ini, fim
+
+
+def periodo_padrao(hoje: Optional[date] = None) -> str:
+    """Quando não há período no texto: dois meses terminando no dia 1º do mês
+    anterior à data de criação do caso."""
+    hoje = hoje or date.today()
+    fim = somar_meses(date(hoje.year, hoje.month, 1), -1)
+    ini = somar_meses(fim, -2)
+    return f"{formatar_data_br(ini)} até {formatar_data_br(fim)}"
 
 
 # ---------------------------------------------------------------------------
@@ -88,15 +192,42 @@ class ContraparteMovimentacao:
     nome: str = ""
     idade: str = ""
     cidade_estado: str = ""
-    renda_presumida: str = ""      # PF: renda; PJ: usar faturamento_presumido
-    registro_profissional: str = ""  # PF: registro profissional; PJ: ramo_atividade
-    data_abertura: str = ""        # PJ
-    ramo_atividade: str = ""       # PJ
-    faturamento_presumido: str = ""  # PJ
-    porte: str = ""                # PJ
+    renda_presumida: str = ""          # PF
+    registro_profissional: str = ""    # PF
+    data_abertura: str = ""            # PJ
+    ramo_atividade: str = ""           # PJ
+    faturamento_presumido: str = ""    # PJ
+    porte: str = ""                    # PJ
     porcentagem: str = ""
     valor: str = ""
     num_transacoes: str = ""
+    # mini-KYC da contraparte
+    registro_societario: str = "Não"
+    registro_societario_detalhe: str = ""
+    regiao_risco: str = "Não"
+    regiao_risco_detalhe: str = ""
+    pep: str = "Não"
+    pep_detalhe: str = ""
+    historico_pld: str = "Não"
+    historico_pld_detalhe: str = ""
+    historico_fraude: str = "Não"
+    historico_fraude_detalhe: str = ""
+    midia_negativa: str = "Não"
+    midia_negativa_detalhe: str = ""
+
+    def flags_risco(self) -> List[str]:
+        out = []
+        if self.pep == "Sim":
+            out.append("PEP")
+        if self.regiao_risco == "Sim":
+            out.append("região de risco")
+        if self.historico_pld == "Sim":
+            out.append("histórico de PLD")
+        if self.historico_fraude == "Sim":
+            out.append("histórico de fraude")
+        if self.midia_negativa == "Sim":
+            out.append("mídia negativa")
+        return out
 
 
 @dataclass
@@ -138,20 +269,32 @@ class Socio:
     midia_negativa: str = "Não"
     midia_negativa_detalhe: str = ""
 
+    def nivel_risco(self) -> str:
+        if self.pep == "Sim" or self.historico_pld == "Sim" or self.historico_fraude == "Sim":
+            return "ALTO"
+        if self.regiao_risco == "Sim" or self.midia_negativa == "Sim":
+            return "MÉDIO"
+        return "BAIXO"
+
+
+_NIVEIS = {"BAIXO": 0, "MÉDIO": 1, "ALTO": 2}
+
 
 @dataclass
 class Caso:
     numero_caso: str
     tipo_caso: str
+    schema_version: int = 2
 
     # Bloco 1 - Alerta / Sentença
     fator_gerador: str = ""
+    data_alerta: str = ""
     sentenca: str = ""
 
     # Bloco 2 - KYC (comum)
     regiao_risco: str = "Não"
-    tipo_regiao_risco: str = ""       # se "Região de Fronteira"/"Extração..."
-    tipo_regiao_risco_2: str = ""     # se "Outras Regiões de Risco"
+    tipo_regiao_risco: str = ""       # Fronteira / Extração... / Outras
+    tipo_regiao_risco_2: str = ""     # detalhe quando "Outras Regiões de Risco"
     pep: str = "Não"
     tipo_pep: str = ""
     descricao_pep: str = ""
@@ -165,6 +308,7 @@ class Caso:
 
     # KYC - PF
     nome_cliente: str = ""
+    genero: str = ""                  # "M", "F" (define o avatar do dossiê)
     idade: str = ""
     cidade_estado: str = ""
     ultima_atualizacao_cadastral: str = ""
@@ -193,7 +337,7 @@ class Caso:
     fachada_empresa_detalhe: str = ""
     socios: List[Socio] = field(default_factory=list)
 
-    # KYC - Under 18 (representante legal)
+    # KYC - Under 18 (responsável legal)
     rep_nome: str = ""
     rep_renda_presumida: str = ""
     rep_reg_prof: str = ""
@@ -216,447 +360,462 @@ class Caso:
     arredondamento_itens: List[ItemArredondamento] = field(default_factory=list)
     comp_pix: str = "Não"
     pix_itens: List[MensagemPix] = field(default_factory=list)
-    comp_evasao: str = ""  # "Rápida Evasão" ou "Sem Rápida Evasão"
+    comp_evasao: str = ""             # "Rápida Evasão" ou "Sem Rápida Evasão"
     comp_mudanca_comportamento: str = ""
     comp_data_abertura_ultimo_reporte: str = ""
+    # Séries diárias do gráfico (guardadas para o gráfico não mudar a cada abertura)
+    timeline_inicio: str = ""         # DD/MM/AAAA do primeiro dia
+    timeline_creditos: List[float] = field(default_factory=list)
+    timeline_debitos: List[float] = field(default_factory=list)
 
-    # Resolução
+    # Aba Resolução do Caso
     parecer_final: str = ""
     alineas: str = ""
     jurisprudencias_selecionadas: List[str] = field(default_factory=list)
     razoes_clear_selecionadas: List[str] = field(default_factory=list)
     razoes_cancelamento_selecionadas: List[str] = field(default_factory=list)
     diligencia: str = ""
+    resolucao_salva_em: Dict[str, str] = field(default_factory=dict)  # seção -> timestamp
+    resolucao_bloqueada_em: str = ""  # "Salvar informações do caso" (trava a aba inteira)
 
-    # Scorecard de qualidade
-    scorecard_tipo: str = "AML Nupag"   # "AML Nupag" ou "AML NuInvest"
-    scorecard_drivers_marcados: List[str] = field(default_factory=list)  # nomes dos drivers
+    # Aba Avaliação de Qualidade
+    scorecard_tipo: str = "AML Nupag"   # redefinido pelo tipo do caso (ver rubrica())
+    scorecard_drivers_marcados: List[str] = field(default_factory=list)
     scorecard_feedback: str = ""
+    scorecard_salvo_em: str = ""
 
-    criado_em: str = field(default_factory=lambda: datetime.now().isoformat())
-    atualizado_em: str = field(default_factory=lambda: datetime.now().isoformat())
+    criado_em: str = field(default_factory=agora_iso)
+    atualizado_em: str = field(default_factory=agora_iso)
 
     # -- helpers ---------------------------------------------------------
     def eh_pj(self) -> bool:
-        return self.tipo_caso == "Pessoa Jurídica (PJ)"
+        return self.tipo_caso == TIPO_PJ
+
+    def rubrica(self) -> str:
+        """AML NuInvest para casos NuInvest; AML Nupag para os demais."""
+        return "AML NuInvest" if self.tipo_caso == TIPO_NUINVEST else "AML Nupag"
 
     def nome_display(self) -> str:
         return self.nome_empresa if self.eh_pj() else self.nome_cliente
 
+    def nota_qualidade(self) -> float:
+        return calcular_nota_scorecard(self.rubrica(), self.scorecard_drivers_marcados)
+
+    def resolucao_travada(self) -> bool:
+        return bool(self.resolucao_bloqueada_em)
+
+    def fatores_risco(self) -> List[Tuple[str, str]]:
+        return fatores_risco_caso(self)
+
     def risco_geral(self) -> str:
-        niveis = {"BAIXO": 0, "MÉDIO": 1, "ALTO": 2}
-        pior = "ALTO" if self.pep == "Sim" else classificar_risco_contraparte(False, "Sim" if self.regiao_risco == "Sim" else "")
-        for s in self.socios:
-            r = "ALTO" if s.pep == "Sim" else ("MÉDIO" if s.regiao_risco == "Sim" else "BAIXO")
-            if niveis[r] > niveis[pior]:
-                pior = r
-        return pior
+        return risco_geral_caso(self)
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
 
     @staticmethod
     def from_dict(d: Dict[str, Any]) -> "Caso":
+        """Reconstrói o Caso ignorando chaves desconhecidas (casos antigos ou
+        de versões futuras continuam abrindo)."""
         d = dict(d)
-        d["socios"] = [Socio(**s) for s in d.get("socios", [])]
-        d["contrapartes_credito"] = [ContraparteMovimentacao(**c) for c in d.get("contrapartes_credito", [])]
-        d["contrapartes_debito"] = [ContraparteMovimentacao(**c) for c in d.get("contrapartes_debito", [])]
-        d["outras_movimentacoes"] = [OutraMovimentacao(**m) for m in d.get("outras_movimentacoes", [])]
-        d["arredondamento_itens"] = [ItemArredondamento(**a) for a in d.get("arredondamento_itens", [])]
-        d["pix_itens"] = [MensagemPix(**p) for p in d.get("pix_itens", [])]
-        return Caso(**d)
+
+        def _lista(chave, classe):
+            return [_construir(classe, x) for x in d.get(chave, []) or []]
+
+        d["socios"] = _lista("socios", Socio)
+        d["contrapartes_credito"] = _lista("contrapartes_credito", ContraparteMovimentacao)
+        d["contrapartes_debito"] = _lista("contrapartes_debito", ContraparteMovimentacao)
+        d["outras_movimentacoes"] = _lista("outras_movimentacoes", OutraMovimentacao)
+        d["arredondamento_itens"] = _lista("arredondamento_itens", ItemArredondamento)
+        d["pix_itens"] = _lista("pix_itens", MensagemPix)
+        return _construir(Caso, d)
+
+
+def _construir(classe, dados: Dict[str, Any]):
+    validos = {f.name for f in fields(classe)}
+    return classe(**{k: v for k, v in dados.items() if k in validos})
 
 
 # ---------------------------------------------------------------------------
-# Scorecard - cálculo da nota
+# Risco geral
 # ---------------------------------------------------------------------------
 
-def calcular_nota_scorecard(tipo: str, drivers_marcados: List[str]) -> float:
-    """Réplica de recalcularScorecard(): nota = 100% - soma(peso*100) dos
-    drivers marcados. Nunca fica negativa."""
-    dados = SCORECARD_NUPAG if tipo == "AML Nupag" else SCORECARD_NUINVEST
-    deducao = 0.0
-    marcados = set(drivers_marcados)
-    for categoria in dados:
-        peso = categoria["peso"]
-        for driver in categoria["drivers"]:
-            if driver["nome"] in marcados:
-                deducao += peso * 100
-    return max(0.0, 100.0 - deducao)
+def _meses_do_periodo(periodo: str) -> int:
+    pr = parse_periodo(periodo)
+    if not pr:
+        return 2
+    ini, fim = pr
+    return max(1, round(((fim - ini).days + 1) / 30.0))
 
+
+def fatores_risco_caso(caso: "Caso") -> List[Tuple[str, str]]:
+    """Lista de (nível, descrição) dos fatores que pesam no risco geral.
+
+    Considera o cadastro do cliente, os sócios (PJ), as contrapartes, os
+    comportamentos do Thundera e a compatibilidade da movimentação com a renda
+    (ou faturamento) presumida."""
+    f: List[Tuple[str, str]] = []
+
+    if caso.pep == "Sim":
+        f.append(("ALTO", "Cliente PEP" + (f" ({caso.tipo_pep})" if caso.tipo_pep else "")))
+    if caso.historico_pld == "Sim":
+        f.append(("ALTO", "Histórico de PLD do cliente"))
+    if caso.historico_fraude == "Sim":
+        f.append(("ALTO", "Histórico de fraude do cliente"))
+    if caso.regiao_risco == "Sim":
+        f.append(("MÉDIO", "Cliente em região de risco"))
+    if caso.midia_negativa == "Sim":
+        f.append(("MÉDIO", "Mídia negativa do cliente"))
+    if caso.tipo_caso == TIPO_UNDER18:
+        if (caso.rep_hist_pld or "").strip().lower() not in ("", "não", "nao", "n/a", NEUTRO.lower()):
+            f.append(("ALTO", "Histórico de PLD do responsável legal"))
+        if (caso.rep_hist_fraude or "").strip().lower() not in ("", "não", "nao", "n/a", NEUTRO.lower()):
+            f.append(("ALTO", "Histórico de fraude do responsável legal"))
+
+    for s in caso.socios:
+        nivel = s.nivel_risco()
+        if nivel != "BAIXO":
+            f.append((nivel, f"Sócio {s.nome or '(sem nome)'} com sinais de risco"))
+
+    for rotulo, lista in (("crédito", caso.contrapartes_credito), ("débito", caso.contrapartes_debito)):
+        for c in lista:
+            flags = c.flags_risco()
+            if flags:
+                nivel = "ALTO" if ({"PEP", "histórico de PLD", "histórico de fraude"} & set(flags)) else "MÉDIO"
+                f.append((nivel, f"Contraparte de {rotulo} {c.nome or ''} ({', '.join(flags)})".replace("  ", " ")))
+
+    if caso.comp_evasao == "Rápida Evasão":
+        f.append(("MÉDIO", "Rápida evasão dos recursos"))
+    if caso.comp_arredondamento == "Sim":
+        f.append(("MÉDIO", "Transações em valores redondos (arredondamento)"))
+    if caso.comp_mudanca_comportamento.strip():
+        f.append(("MÉDIO", "Mudança de comportamento"))
+    if any(m.tipo == "Saques" and m.info.strip() for m in caso.outras_movimentacoes):
+        f.append(("MÉDIO", "Saques em espécie"))
+
+    base = caso.faturamento_presumido if caso.eh_pj() else caso.renda_presumida
+    renda = parse_valor_br(base)
+    mov = max(parse_valor_br(caso.mov_total_credito), parse_valor_br(caso.mov_total_debito))
+    if renda > 0 and mov > 0:
+        razao = mov / (renda * _meses_do_periodo(caso.mov_periodo))
+        base_txt = "do faturamento presumido" if caso.eh_pj() else "da renda presumida"
+        if razao >= 10:
+            f.append(("ALTO", f"Movimentação {razao:.0f}x acima {base_txt} no período"))
+        elif razao >= 3:
+            f.append(("MÉDIO", f"Movimentação {razao:.1f}x acima {base_txt} no período".replace(".", ",")))
+    return f
+
+
+def risco_geral_caso(caso: "Caso") -> str:
+    fatores = fatores_risco_caso(caso)
+    if not fatores:
+        return "BAIXO"
+    pior = max((_NIVEIS[n] for n, _ in fatores))
+    medios = sum(1 for n, _ in fatores if n == "MÉDIO")
+    if pior < 2 and medios >= 3:
+        pior = 2  # vários sinais médios somados viram risco alto
+    return {0: "BAIXO", 1: "MÉDIO", 2: "ALTO"}[pior]
+
+
+# ---------------------------------------------------------------------------
+# Avatar / gênero
+# ---------------------------------------------------------------------------
+
+_NOMES_FEMININOS = {
+    "isabel", "beatriz", "raquel", "carmen", "ester", "ingrid", "lais", "laís", "iris", "íris", "ruth",
+    "miriam", "míriam", "rachel", "abigail", "alice", "aline", "luz", "mirian", "thais", "thaís", "marisol",
+    "liz", "rose", "joyce", "michele", "nicole", "simone", "denise", "elisabete", "elizabeth",
+}
+_NOMES_MASCULINOS = {
+    "luca", "joshua", "jonas", "elias", "lucas", "matheus", "mateus", "thomas", "tomas", "tomás", "joão", "joao",
+    "jose", "josé", "marcos", "marcio", "márcio", "paulo", "pedro", "rafael", "gabriel", "miguel", "daniel",
+    "samuel", "manuel", "rodrigo", "diego", "thiago", "tiago", "bruno", "carlos", "ricardo", "felipe", "fernando",
+    "gustavo", "henrique", "leonardo", "eduardo", "marcelo", "fabio", "fábio", "andre", "andré", "caio", "davi",
+    "lorenzo", "enzo", "vitor", "victor", "arthur", "artur", "heitor", "bernardo", "nicolas", "nicolau",
+}
+_NOMES_AMBIGUOS = {
+    "alex", "cris", "dani", "jean", "juan", "ariel", "noa", "sasha", "ale", "gabi", "jamie", "andrea", "robin",
+    "val", "kelly", "kely", "mel", "nico", "rennan", "renan", "lui", "luan", "dayan", "yuri", "jô", "jo",
+}
+
+
+def inferir_genero(nome: str) -> Optional[str]:
+    """'M' ou 'F' a partir do primeiro nome; None se for ambíguo ou desconhecido
+    (nesse caso o Sentinela pergunta ao analista)."""
+    partes = (nome or "").strip().split()
+    if not partes:
+        return None
+    p = partes[0].lower()
+    if p in _NOMES_AMBIGUOS:
+        return None
+    if p in _NOMES_FEMININOS:
+        return "F"
+    if p in _NOMES_MASCULINOS:
+        return "M"
+    if p.endswith(("a", "ã", "e")) and p not in ("jose", "dante", "felipe", "alexandre", "henrique", "jorge", "wellington"):
+        return "F" if p.endswith(("a", "ã")) else None
+    if p.endswith(("o", "r", "s", "l", "n", "m", "u", "z", "k", "d", "t", "i")):
+        return "M"
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Campos obrigatórios (os mesmos do artefato original)
+# ---------------------------------------------------------------------------
+
+def validar_caso(caso: Caso) -> List[str]:
+    """Devolve os rótulos dos campos obrigatórios que faltam.
+
+    Todos os tipos, exceto PJ: nome, idade, renda presumida e gênero.
+    PJ: nome da empresa e faturamento presumido.
+    Todos: período, totais de créditos e débitos e total de contrapartes."""
+    faltando: List[str] = []
+    if caso.eh_pj():
+        if not caso.nome_empresa.strip():
+            faltando.append("Nome da Empresa")
+        if not caso.faturamento_presumido.strip():
+            faltando.append("Faturamento Presumido")
+    else:
+        if not caso.nome_cliente.strip():
+            faltando.append("Nome do Cliente")
+        if not caso.idade.strip():
+            faltando.append("Idade")
+        if not caso.renda_presumida.strip():
+            faltando.append("Renda Presumida do Cliente")
+        if caso.genero not in ("M", "F"):
+            faltando.append("Gênero do cliente")
+    if not caso.mov_periodo.strip():
+        faltando.append("Período")
+    if not caso.mov_total_credito.strip():
+        faltando.append("Total de Créditos")
+    if not caso.mov_total_debito.strip():
+        faltando.append("Total de Débitos")
+    if not caso.mov_total_contrapartes_credito.strip():
+        faltando.append("Total de Contrapartes (Crédito)")
+    if not caso.mov_total_contrapartes_debito.strip():
+        faltando.append("Total de Contrapartes (Débito)")
+    return faltando
+
+
+def percentual_restante(contrapartes: List[ContraparteMovimentacao]) -> Optional[float]:
+    """100% menos a soma das porcentagens listadas; None se nenhuma tiver porcentagem."""
+    pcts = [parse_valor_br(c.porcentagem) for c in contrapartes if (c.porcentagem or "").strip()]
+    if not pcts:
+        return None
+    return max(0.0, 100.0 - sum(pcts))
+
+
+# ---------------------------------------------------------------------------
+# Scorecard (avaliação de qualidade)
+# ---------------------------------------------------------------------------
 
 def listar_drivers_scorecard(tipo: str) -> List[Dict[str, Any]]:
-    return SCORECARD_NUPAG if tipo == "AML Nupag" else SCORECARD_NUINVEST
+    return SCORECARD_NUINVEST if tipo == "AML NuInvest" else SCORECARD_NUPAG
+
+
+def calcular_nota_scorecard(tipo: str, drivers_marcados: List[str]) -> float:
+    """Nota de qualidade, de 0 a 100.
+
+    Regra do artefato original: a nota parte de 100% e perde o peso de cada
+    CATEGORIA que tenha ao menos um critério marcado, uma única vez. Marcar três
+    critérios de Customer Critical desconta 15% (não 45%). Um critério de
+    Regulatory Critical (peso 100%) zera a nota. Business Intelligence (peso 0%)
+    registra o problema sem descontar."""
+    marcados = set(drivers_marcados or [])
+    nota = 100.0
+    for categoria in listar_drivers_scorecard(tipo):
+        if any(d["nome"] in marcados for d in categoria["drivers"]):
+            nota -= categoria["peso"] * 100
+    return max(0.0, round(nota, 2))
+
+
+def faixa_nota(nota: float) -> str:
+    """Faixa de cor da nota: verde a partir de 90%, âmbar de 70% a 89%, vermelho abaixo de 70%."""
+    if nota >= 90:
+        return "verde"
+    if nota >= 70:
+        return "ambar"
+    return "vermelho"
+
+
+def formatar_nota(nota: float) -> str:
+    return f"{nota:.0f}%" if abs(nota - round(nota)) < 1e-9 else f"{nota:.1f}%".replace(".", ",")
+
+
+def resumo_scorecard(caso: Caso) -> List[Dict[str, Any]]:
+    """Por categoria: peso, critérios marcados (com a aplicabilidade) e total de critérios."""
+    marcados = set(caso.scorecard_drivers_marcados)
+    out = []
+    for cat in listar_drivers_scorecard(caso.rubrica()):
+        sel = [d for d in cat["drivers"] if d["nome"] in marcados]
+        out.append({
+            "categoria": cat["categoria"], "peso": cat["peso"],
+            "total": len(cat["drivers"]), "marcados": sel,
+        })
+    return out
+
+
+def estilo_diligencia(diligencia: str) -> str:
+    """Cor do selo: verde (Clear), âmbar (Reportar), vermelho (Reportar e Cancelar), neutro (Cancelar)."""
+    d = (diligencia or "").lower()
+    if d.startswith("clear"):
+        return "verde"
+    if d.startswith("reportar e cancelar"):
+        return "vermelho"
+    if d.startswith("reportar"):
+        return "ambar"
+    if d.startswith("cancelar"):
+        return "neutro"
+    return "pendente"
 
 
 # ---------------------------------------------------------------------------
-# Preenchimento automático via IA (Anthropic API)
+# Mudança de comportamento
 # ---------------------------------------------------------------------------
 
-SCHEMA_EXTRACAO = """{
-  "kyc": {
-    "nome": "", "idade": "", "cidadeEstado": "", "ultimaAtualizacaoCadastral": "DD/MM/AAAA",
-    "profissaoInformada": "", "rendaPresumida": "", "registroProfissional": "",
-    "registroSocietario": "Sim ou Não", "regiaoRisco": "Sim ou Não",
-    "tipoRegiaoRisco": "Região de Fronteira ou Região de Extração Mineral e/ou de Extração de Madeira ou Outras Regiões de Risco",
-    "pep": "Sim ou Não", "historicoPld": "Sim ou Não", "historicoFraude": "Sim ou Não",
-    "midiaNegativa": "Sim ou Não", "outrasInformacoes": "",
-    "nomeEmpresa": "", "dataAberturaEmpresa": "DD/MM/AAAA", "ramoAtividade": "", "porte": "",
-    "faturamentoPresumido": "", "endereco": ""
-  },
-  "movimentacoes": {
-    "periodo": "DD/MM/AAAA até DD/MM/AAAA", "totalCredito": "R$X,00", "totalContrapartesCredito": "",
-    "totalDebito": "R$X,00", "totalContrapartesDebito": "",
-    "contrapartesCredito": [{"tipo": "Pessoa Física ou Pessoa Jurídica", "porcentagem": "", "valor": "R$X,00", "numTransacoes": "", "nome": "", "idade": "", "cidadeEstado": "", "rendaPresumida": "", "registroProfissional": ""}],
-    "contrapartesDebito": [{"tipo": "Pessoa Física ou Pessoa Jurídica", "porcentagem": "", "valor": "R$X,00", "numTransacoes": "", "nome": "", "idade": "", "cidadeEstado": "", "rendaPresumida": "", "registroProfissional": ""}]
-  },
-  "thundera": {
-    "arredondamento": "Sim, Não, ou vazio", "arredondamentoQuantidade": "", "arredondamentoValor": "",
-    "arredondamentoCredDeb": "Créditos ou Débitos",
-    "pix": "Sim, Não, ou vazio", "pixQuantidade": "", "pixMensagem": "", "pixCredDeb": "Créditos ou Débitos",
-    "evasao": "Rápida Evasão ou Sem Rápida Evasão",
-    "mudancaComportamento": {"houve": "Sim ou Não", "valorAproximado": ""},
-    "dataAberturaContaUltimoReporte": ""
-  },
-  "outrasMovimentacoes": [{"tipo": "Saques ou Boletos ou Gastos Cartão de Crédito ou Gastos Cartão de Débito ou Empréstimos ou Criptomoedas ou Investimentos ou Outros", "info": ""}]
-}"""
+def gerar_narrativa_mudanca_comportamento(periodo_texto: str, valor_aproximado: str,
+                                          hoje: Optional[date] = None) -> str:
+    """Narrativa mês a mês, igual à do artefato original.
 
-SYSTEM_PROMPT_EXTRACAO = (
-    "Você extrai dados estruturados de um resumo em texto livre de um caso de "
-    "compliance PLD/AML, e devolve APENAS um objeto JSON válido (sem markdown, "
-    "sem crases, sem texto antes ou depois), seguindo EXATAMENTE este formato de campos:\n\n"
-    + SCHEMA_EXTRACAO +
-    "\n\nRegras: se uma informação não estiver no texto, use uma string vazia \"\" -- não "
-    "presuma relações, motivações ou conclusões que o texto não afirma explicitamente. "
-    "Datas no formato DD/MM/AAAA. Campos de Sim/Não devem ser exatamente \"Sim\" ou \"Não\". "
-    "Se o texto não mencionar contrapartes de algum lado, devolva uma lista vazia []. Seja "
-    "extremamente conciso em todos os campos de texto livre."
-)
+    Os cinco meses anteriores ao início do período recebem valores-base fixos
+    (R$1.000,00; R$1.500,00; R$2.000,00; R$0,00 e R$0,10) e o pico informado é
+    atribuído ao PRIMEIRO mês do período. Sem período válido, usa o período
+    padrão (dois meses terminando no dia 1º do mês anterior à criação)."""
+    pr = parse_periodo(periodo_texto) or parse_periodo(periodo_padrao(hoje))
+    inicio = pr[0]
+    pico = normalizar_valor_texto(valor_aproximado) or "R$0,00"
+    linhas = []
+    for k, valor in zip(range(5, 0, -1), VALORES_BASE_MUDANCA):
+        mes = somar_meses(inicio, -k)
+        linhas.append(f"{NOMES_MESES[mes.month - 1]} {valor}")
+    linhas.append(f"{NOMES_MESES[inicio.month - 1]} {pico}")
+    return "\n".join(linhas)
 
 
-class ErroExtracaoIA(Exception):
-    pass
+# ---------------------------------------------------------------------------
+# Timeline de transferências (gráfico)
+# ---------------------------------------------------------------------------
 
+def gerar_series_timeline(periodo: str, total_credito: float, total_debito: float,
+                          evasao: str, rng: Optional[random.Random] = None
+                          ) -> Tuple[str, List[float], List[float]]:
+    """Distribui os totais dia a dia ao longo do período.
 
-def _config_llm() -> Dict[str, str]:
-    """Descobre como falar com o serviço de IA, a partir de variáveis de ambiente.
+    Com rápida evasão, créditos e débitos usam os mesmos pesos diários (o
+    dinheiro entra e sai no mesmo dia). Sem rápida evasão, os dois lados
+    alternam dias. A distribuição é sorteada: o gráfico ilustra o padrão, não
+    reproduz um extrato."""
+    rng = rng or random.Random()
+    pr = parse_periodo(periodo) or parse_periodo(periodo_padrao())
+    ini, fim = pr
+    dias = min(max((fim - ini).days + 1, 1), 400)
+    pesos = [rng.random() ** 3 + 0.01 for _ in range(dias)]
 
-    Suporta três cenários:
+    def _normalizar(ws: List[float], total: float) -> List[float]:
+        soma = sum(ws)
+        if not soma:
+            return [0.0 for _ in ws]
+        valores = [round(total * w / soma, 2) for w in ws]
+        # joga a diferença de arredondamento no maior dia, para a soma bater com o total
+        resto = round(total - sum(valores), 2)
+        if resto:
+            i = max(range(len(valores)), key=lambda k: valores[k])
+            valores[i] = round(valores[i] + resto, 2)
+        return valores
 
-    1. API da Anthropic direta (padrão)
-         ANTHROPIC_API_KEY=sk-ant-...
-       Usa https://api.anthropic.com com header x-api-key.
-
-    2. Proxy LiteLLM (comum em empresas) -- formato OpenAI
-         ANTHROPIC_API_KEY=<key do LiteLLM>
-         ANTHROPIC_BASE_URL=https://litellm.suaempresa.com
-       Usa <base>/v1/chat/completions com header Authorization: Bearer.
-       É o modo padrão quando a base URL NÃO é api.anthropic.com, porque a
-       rota compatível com OpenAI é a que todo proxy LiteLLM expõe.
-
-    3. Proxy LiteLLM -- formato Anthropic (passthrough)
-         SENTINELA_LLM_FORMATO=anthropic
-       Força o uso de <base>/v1/messages mesmo em um proxy. Use se o seu
-       LiteLLM estiver configurado com a rota de passthrough da Anthropic.
-
-    Outras variáveis:
-         SENTINELA_LLM_MODELO -- nome do modelo (o nome no proxy pode ser
-             diferente, ex: "claude-sonnet-4" em vez de "claude-sonnet-4-6").
-    """
-    base = os.environ.get("ANTHROPIC_BASE_URL", "https://api.anthropic.com").rstrip("/")
-    eh_anthropic_oficial = "api.anthropic.com" in base
-    formato = os.environ.get(
-        "SENTINELA_LLM_FORMATO",
-        "anthropic" if eh_anthropic_oficial else "openai",
-    ).strip().lower()
-    return {"base": base, "formato": formato}
-
-
-def extrair_dados_do_texto(
-    texto: str,
-    texto_outras_movimentacoes: str = "",
-    api_key: Optional[str] = None,
-    model: Optional[str] = None,
-    timeout: int = 60,
-) -> Dict[str, Any]:
-    """Chama o serviço de IA para extrair dados estruturados de um texto livre,
-    replicando a função `extrairDadosDoTexto` do artefato original.
-
-    No artefato original (dentro do Claude), a chamada a api.anthropic.com não
-    precisava de API key -- o próprio ambiente do Claude autenticava. Fora do
-    Claude, é uma chamada HTTP comum e precisa de credencial.
-
-    Funciona tanto com a API da Anthropic direta quanto com um proxy LiteLLM
-    corporativo -- ver _config_llm() acima para as variáveis de ambiente.
-    """
-    api_key = api_key or os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        raise ErroExtracaoIA(
-            "ANTHROPIC_API_KEY não configurada. Defina a variável de ambiente "
-            "ANTHROPIC_API_KEY (via Secret do Databricks) -- ver README.md."
-        )
-
-    cfg = _config_llm()
-    model = model or os.environ.get("SENTINELA_LLM_MODELO", "claude-sonnet-4-6")
-
-    texto_usuario = texto
-    if texto_outras_movimentacoes and texto_outras_movimentacoes.strip():
-        texto_usuario += ("\n\n---\nOutras Movimentações (não bancárias): "
-                          + texto_outras_movimentacoes.strip())
-
-    if cfg["formato"] == "openai":
-        url = cfg["base"] + "/v1/chat/completions"
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": "Bearer " + api_key,
-        }
-        payload = {
-            "model": model,
-            "max_tokens": 8000,
-            "messages": [
-                {"role": "system", "content": SYSTEM_PROMPT_EXTRACAO},
-                {"role": "user", "content": texto_usuario},
-            ],
-        }
+    if evasao == "Rápida Evasão" or dias == 1:
+        cred = _normalizar(pesos, total_credito)
+        deb = _normalizar(pesos, total_debito)
     else:
-        url = cfg["base"] + "/v1/messages"
-        headers = {
-            "Content-Type": "application/json",
-            "x-api-key": api_key,
-            "anthropic-version": "2023-06-01",
-        }
-        payload = {
-            "model": model,
-            "max_tokens": 8000,
-            "system": SYSTEM_PROMPT_EXTRACAO,
-            "messages": [{"role": "user", "content": texto_usuario}],
-        }
-
-    ultimo_erro = None
-    for _ in range(2):
-        try:
-            resp = requests.post(url, headers=headers, json=payload, timeout=timeout)
-            if resp.status_code == 401:
-                raise ErroExtracaoIA(
-                    "Credencial rejeitada (401) por " + cfg["base"] + ". Verifique se a "
-                    "ANTHROPIC_API_KEY corresponde a esse endpoint: uma key de proxy "
-                    "(LiteLLM) não funciona em api.anthropic.com, e vice-versa. "
-                    "Para usar um proxy, defina ANTHROPIC_BASE_URL."
-                )
-            if resp.status_code == 404:
-                raise ErroExtracaoIA(
-                    "Endpoint não encontrado (404): " + url + ". Se o seu proxy usa o "
-                    "formato Anthropic, defina SENTINELA_LLM_FORMATO=anthropic; se usa "
-                    "o formato OpenAI, defina SENTINELA_LLM_FORMATO=openai."
-                )
-            resp.raise_for_status()
-            data = resp.json()
-            return _extrair_json_da_resposta(data, cfg["formato"])
-        except ErroExtracaoIA:
-            raise
-        except Exception as e:  # noqa: BLE001
-            ultimo_erro = e
-            continue
-
-    raise ErroExtracaoIA(
-        "Não foi possível conectar ao serviço de IA em " + url + " depois de duas "
-        f"tentativas ({ultimo_erro}). Verifique a credencial e o acesso de rede "
-        "a esse endereço."
-    )
+        pc = [w if i % 2 == 0 else 0.0 for i, w in enumerate(pesos)]
+        pd = [w if i % 2 == 1 else 0.0 for i, w in enumerate(pesos)]
+        cred = _normalizar(pc, total_credito)
+        deb = _normalizar(pd, total_debito)
+    return formatar_data_br(ini), cred, deb
 
 
-def _extrair_json_da_resposta(data: Dict[str, Any], formato: str) -> Dict[str, Any]:
-    """Tira o texto da resposta (formato Anthropic ou OpenAI) e faz o parse do
-    JSON que a IA devolveu."""
-    if formato == "openai":
-        escolhas = data.get("choices") or []
-        if not escolhas:
-            raise ErroExtracaoIA("O serviço de IA devolveu uma resposta vazia.")
-        if escolhas[0].get("finish_reason") == "length":
-            raise ErroExtracaoIA(
-                "A resposta da IA foi cortada por ser muito longa. Tente um resumo "
-                "mais curto ou com menos contrapartes de uma vez."
-            )
-        texto_resposta = (escolhas[0].get("message") or {}).get("content") or ""
-    else:
-        if data.get("stop_reason") == "max_tokens":
-            raise ErroExtracaoIA(
-                "A resposta da IA foi cortada por ser muito longa. Tente um resumo "
-                "mais curto ou com menos contrapartes de uma vez."
-            )
-        texto_resposta = "".join(
-            b.get("text", "") for b in data.get("content", []) if b.get("type") == "text"
-        )
-
-    json_limpo = re.sub(r"```json|```", "", texto_resposta).strip()
-    try:
-        return json.loads(json_limpo)
-    except json.JSONDecodeError as e:
-        raise ErroExtracaoIA(
-            "A IA não devolveu um JSON válido. Tente novamente ou reescreva o "
-            f"resumo do caso. (detalhe: {e})"
-        )
+def aplicar_timeline_ao_caso(caso: Caso, rng: Optional[random.Random] = None) -> bool:
+    """(Re)gera a série diária do caso a partir do período, dos totais e da escolha de
+    evasão. Devolve False se não houver totais para montar o gráfico."""
+    total_c = parse_valor_br(caso.mov_total_credito)
+    total_d = parse_valor_br(caso.mov_total_debito)
+    if not caso.comp_evasao or not (total_c or total_d):
+        return False
+    caso.timeline_inicio, caso.timeline_creditos, caso.timeline_debitos = gerar_series_timeline(
+        caso.mov_periodo, total_c, total_d, caso.comp_evasao, rng)
+    return True
 
 
-def aplicar_dados_extraidos(caso: Caso, dados: Dict[str, Any]) -> Caso:
-    """Aplica o JSON extraído pela IA nos campos do Caso, análogo a
-    `aplicarDadosNoFormulario` no artefato original."""
-    kyc = dados.get("kyc", {})
-    mov = dados.get("movimentacoes", {})
-    thun = dados.get("thundera", {})
-    outras = dados.get("outrasMovimentacoes", [])
-
-    if caso.eh_pj():
-        caso.nome_empresa = kyc.get("nomeEmpresa", "") or caso.nome_empresa
-        caso.data_abertura = kyc.get("dataAberturaEmpresa", "") or caso.data_abertura
-        caso.ramo_atividade = kyc.get("ramoAtividade", "") or caso.ramo_atividade
-        caso.porte = kyc.get("porte", "") or caso.porte
-        caso.faturamento_presumido = kyc.get("faturamentoPresumido", "") or caso.faturamento_presumido
-        caso.endereco = kyc.get("endereco", "") or caso.endereco
-    else:
-        caso.nome_cliente = kyc.get("nome", "") or caso.nome_cliente
-        caso.idade = kyc.get("idade", "") or caso.idade
-        caso.cidade_estado = kyc.get("cidadeEstado", "") or caso.cidade_estado
-        caso.ultima_atualizacao_cadastral = kyc.get("ultimaAtualizacaoCadastral", "") or caso.ultima_atualizacao_cadastral
-        caso.profissao_informada = kyc.get("profissaoInformada", "") or caso.profissao_informada
-        caso.renda_presumida = kyc.get("rendaPresumida", "") or caso.renda_presumida
-        caso.registro_profissional = kyc.get("registroProfissional", "") or caso.registro_profissional
-        caso.registro_societario = kyc.get("registroSocietario", "") or caso.registro_societario
-
-    caso.regiao_risco = kyc.get("regiaoRisco", "") or caso.regiao_risco
-    caso.tipo_regiao_risco = kyc.get("tipoRegiaoRisco", "") or caso.tipo_regiao_risco
-    caso.pep = kyc.get("pep", "") or caso.pep
-    caso.historico_pld = kyc.get("historicoPld", "") or caso.historico_pld
-    caso.historico_fraude = kyc.get("historicoFraude", "") or caso.historico_fraude
-    caso.midia_negativa = kyc.get("midiaNegativa", "") or caso.midia_negativa
-    caso.outras_info = kyc.get("outrasInformacoes", "") or caso.outras_info
-
-    caso.mov_periodo = mov.get("periodo", "") or caso.mov_periodo
-    caso.mov_total_credito = mov.get("totalCredito", "") or caso.mov_total_credito
-    caso.mov_total_contrapartes_credito = mov.get("totalContrapartesCredito", "") or caso.mov_total_contrapartes_credito
-    caso.mov_total_debito = mov.get("totalDebito", "") or caso.mov_total_debito
-    caso.mov_total_contrapartes_debito = mov.get("totalContrapartesDebito", "") or caso.mov_total_contrapartes_debito
-
-    def _mapear_contrapartes(lst):
-        out = []
-        for c in lst or []:
-            out.append(ContraparteMovimentacao(
-                tipo=c.get("tipo", "Pessoa Física"), nome=c.get("nome", ""),
-                idade=c.get("idade", ""), cidade_estado=c.get("cidadeEstado", ""),
-                renda_presumida=c.get("rendaPresumida", ""),
-                registro_profissional=c.get("registroProfissional", ""),
-                porcentagem=c.get("porcentagem", ""), valor=c.get("valor", ""),
-                num_transacoes=c.get("numTransacoes", ""),
-            ))
-        return out
-
-    novas_credito = _mapear_contrapartes(mov.get("contrapartesCredito"))
-    novas_debito = _mapear_contrapartes(mov.get("contrapartesDebito"))
-    if novas_credito:
-        caso.contrapartes_credito = novas_credito
-    if novas_debito:
-        caso.contrapartes_debito = novas_debito
-
-    caso.comp_arredondamento = thun.get("arredondamento", "") or caso.comp_arredondamento
-    if caso.comp_arredondamento == "Sim" and thun.get("arredondamentoQuantidade"):
-        caso.arredondamento_itens = [ItemArredondamento(
-            cred_deb=thun.get("arredondamentoCredDeb", "Créditos"),
-            quantidade=thun.get("arredondamentoQuantidade", ""),
-            valor=thun.get("arredondamentoValor", ""),
-        )]
-
-    caso.comp_pix = thun.get("pix", "") or caso.comp_pix
-    if caso.comp_pix == "Sim" and thun.get("pixQuantidade"):
-        caso.pix_itens = [MensagemPix(
-            cred_deb=thun.get("pixCredDeb", "Créditos"),
-            quantidade=thun.get("pixQuantidade", ""),
-            mensagem=thun.get("pixMensagem", ""),
-        )]
-
-    caso.comp_evasao = thun.get("evasao", "") or caso.comp_evasao
-    mud = thun.get("mudancaComportamento", {}) or {}
-    if mud.get("houve") == "Sim":
-        caso.comp_mudanca_comportamento = gerar_narrativa_mudanca_comportamento(
-            caso.mov_periodo, mud.get("valorAproximado", "")
-        )
-    caso.comp_data_abertura_ultimo_reporte = thun.get("dataAberturaContaUltimoReporte", "") or caso.comp_data_abertura_ultimo_reporte
-
-    if outras:
-        caso.outras_movimentacoes = [
-            OutraMovimentacao(tipo=o.get("tipo", "Outros"), info=o.get("info", "")) for o in outras
-        ]
-
-    return caso
+def _escala_eixo(valor_max: float) -> Tuple[float, float]:
+    """(topo, passo) do eixo Y: topo é o próximo múltiplo do passo acima do maior valor."""
+    if valor_max <= 0:
+        return 10.0, 5.0
+    bruto = valor_max / 1.0
+    magnitude = 10 ** (len(str(int(bruto))) - 1) if bruto >= 1 else 1
+    passo = magnitude
+    topo = (int(valor_max // passo) + 1) * passo
+    if topo / passo < 2:
+        topo += passo
+    return float(topo), float(passo)
 
 
-_NOMES_MESES = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho",
-                "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"]
-
-
-def gerar_narrativa_mudanca_comportamento(periodo_texto: str, valor_aproximado: str) -> str:
-    """Réplica simplificada de gerarNarrativaMudancaComportamento(): monta uma
-    frase padrão apontando o mês do pico de movimentação."""
-    mes = datetime.now().strftime("%m")
-    try:
-        mes_nome = _NOMES_MESES[int(mes) - 1]
-    except Exception:
-        mes_nome = ""
-    valor = valor_aproximado or "um valor expressivo"
-    return (
-        f"Houve alteração no padrão de movimentação do cliente, com destaque para "
-        f"{mes_nome}, mês em que o volume transacionado atingiu aproximadamente {valor}, "
-        f"acima do praticado nos demais meses do período analisado ({periodo_texto})."
-    )
-
-
-# ---------------------------------------------------------------------------
-# Gráfico de timeline (equivalente ao SVG do artefato original)
-# ---------------------------------------------------------------------------
-
-def gerar_grafico_timeline(
-    total_credito: float, total_debito: float, periodo_dias: int = 30,
-) -> bytes:
-    """Gera um gráfico simples de evolução diária de créditos/débitos ao
-    longo do período, como PNG em memória. É uma versão simplificada (com
-    distribuição de pesos aleatória) do gráfico SVG do artefato original --
-    serve para ilustrar visualmente a 'rápida evasão' ou não."""
+def renderizar_timeline_png(inicio: str, creditos: List[float], debitos: List[float],
+                            largura_pol: float = 8.6, altura_pol: float = 3.3, dpi: int = 130) -> bytes:
+    """Gráfico de barras espelhadas (créditos acima, débitos abaixo), no estilo do dossiê."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-    import numpy as np
 
-    dias = np.arange(1, periodo_dias + 1)
-    pesos_credito = np.random.dirichlet(np.ones(periodo_dias)) * total_credito
-    pesos_debito = np.random.dirichlet(np.ones(periodo_dias)) * total_debito
+    n = len(creditos)
+    ini = parse_data_br(inicio) or date.today()
+    fig, ax = plt.subplots(figsize=(largura_pol, altura_pol), dpi=dpi)
+    xs = list(range(n))
+    ax.bar(xs, creditos, color="#2F6F62", width=0.78, linewidth=0)
+    ax.bar(xs, [-d for d in debitos], color="#A13D2E", width=0.78, linewidth=0)
+    ax.axhline(0, color="#2A2035", linewidth=1.0)
 
-    fig, ax = plt.subplots(figsize=(6.2, 2.6), dpi=140)
-    ax.bar(dias, pesos_credito, color="#2F6F62", label="Créditos", width=0.8)
-    ax.bar(dias, -pesos_debito, color="#A13D2E", label="Débitos", width=0.8)
-    ax.axhline(0, color="#2A2035", linewidth=0.8)
-    ax.set_xlabel("Dia do período", fontsize=8)
-    ax.set_ylabel("Valor (R$)", fontsize=8)
-    ax.tick_params(labelsize=7)
-    ax.legend(fontsize=7, loc="upper right", frameon=False)
-    ax.spines[["top", "right"]].set_visible(False)
+    vmax = max([*creditos, *debitos, 0.0])
+    topo, passo = _escala_eixo(vmax)
+    ax.set_ylim(-topo, topo)
+    ticks = [-topo, -topo / 2, 0, topo / 2, topo]
+    if topo / passo >= 2:
+        ticks = [v * passo for v in range(-int(topo // passo), int(topo // passo) + 1)]
+        if len(ticks) > 5:
+            ticks = [-topo, -topo / 2, 0, topo / 2, topo]
+    ax.set_yticks(ticks)
+
+    def _fmt(v, _pos=None):
+        s = f"R$ {abs(v) / 1000:.2f}K".replace(".", ",")
+        return ("-" + s) if v < 0 else s
+
+    ax.set_yticklabels([_fmt(v) for v in ticks], fontsize=7, family="DejaVu Sans Mono", color="#2A2035")
+    ax.grid(axis="y", color="#C9B6DE", linewidth=0.8)
+    ax.set_axisbelow(True)
+    passo_x = max(1, round(n / 12)) if n else 1
+    pos = list(range(0, n, passo_x))
+    ax.set_xticks(pos)
+    ax.set_xticklabels([formatar_data_br(ini + timedelta(days=p)) for p in pos],
+                       fontsize=7, family="DejaVu Sans Mono", color="#2A2035")
+    ax.set_xlim(-1, max(n, 1))
+    for lado in ("top", "right", "left", "bottom"):
+        ax.spines[lado].set_visible(False)
+    ax.tick_params(length=0)
+    ax.tick_params(axis="x", pad=9)
+    ax.set_title("Timeline de Transferências", fontsize=10.5, family="DejaVu Sans Mono",
+                 fontweight="bold", color="#2A2035", pad=10)
     fig.tight_layout()
-
     buf = BytesIO()
     fig.savefig(buf, format="png", transparent=True)
     plt.close(fig)
     return buf.getvalue()
 
 
-def _parse_valor_br(valor_str: str) -> float:
-    """Converte 'R$1.234,56' (ou variações) para float. Retorna 0.0 se não
-    conseguir interpretar."""
-    if not valor_str:
-        return 0.0
-    limpo = re.sub(r"[^\d,.-]", "", valor_str)
-    limpo = limpo.replace(".", "").replace(",", ".")
-    try:
-        return float(limpo)
-    except ValueError:
-        return 0.0
+def grafico_do_caso(caso: Caso, **kw) -> Optional[bytes]:
+    """PNG do gráfico do caso (None se o caso não tiver timeline)."""
+    if not caso.timeline_creditos:
+        return None
+    return renderizar_timeline_png(caso.timeline_inicio, caso.timeline_creditos,
+                                   caso.timeline_debitos, **kw)
 
 
 # ---------------------------------------------------------------------------
@@ -664,51 +823,148 @@ def _parse_valor_br(valor_str: str) -> float:
 # ---------------------------------------------------------------------------
 
 class ArmazenamentoLocal:
+    """Banco de Dossiês em arquivos: um JSON por caso, um índice leve e o PDF
+    mais recente de cada caso. Funciona igual em disco local e em um Volume do
+    Unity Catalog (SENTINELA_DATA_DIR).
+
+    Layout:
+        <base>/indice_dossies.json
+        <base>/caso_<numero>.json
+        <base>/pdfs/dossie_<numero>.pdf
+    """
+
     def __init__(self, base_dir: Optional[str] = None):
         self.base_dir = base_dir or os.environ.get("SENTINELA_DATA_DIR", "./data")
         os.makedirs(self.base_dir, exist_ok=True)
         os.makedirs(self._pasta_pdfs(), exist_ok=True)
         self._indice_path = os.path.join(self.base_dir, "indice_dossies.json")
+        self._lock_path = os.path.join(self.base_dir, ".indice.lock")
         if not os.path.exists(self._indice_path):
             self._escrever_indice([])
 
+    # -- caminhos --------------------------------------------------------
     def _pasta_pdfs(self) -> str:
         return os.path.join(self.base_dir, "pdfs")
 
     def _caso_path(self, numero_caso: str) -> str:
+        if not numero_caso_valido(numero_caso):
+            raise ValueError(f"Número de caso inválido: {numero_caso!r}")
         return os.path.join(self.base_dir, f"caso_{numero_caso}.json")
 
     def _pdf_path(self, numero_caso: str) -> str:
+        if not numero_caso_valido(numero_caso):
+            raise ValueError(f"Número de caso inválido: {numero_caso!r}")
         return os.path.join(self._pasta_pdfs(), f"dossie_{numero_caso}.pdf")
 
+    # -- escrita atômica e trava ----------------------------------------
+    @staticmethod
+    def _escrever_atomico(path: str, dados: bytes) -> None:
+        pasta = os.path.dirname(path) or "."
+        fd, tmp = tempfile.mkstemp(dir=pasta, prefix=".tmp_", suffix=".part")
+        try:
+            with os.fdopen(fd, "wb") as f:
+                f.write(dados)
+            os.replace(tmp, path)
+        except Exception:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+            raise
+
+    @contextmanager
+    def _trava(self, timeout: float = 10.0) -> Iterator[None]:
+        """Evita que duas gravações simultâneas do índice se atropelem (a última
+        gravação não apaga mais o caso da outra). Usa um arquivo de trava criado
+        com O_EXCL, que funciona em disco local e em Volumes."""
+        inicio = time.time()
+        fd = None
+        while True:
+            try:
+                fd = os.open(self._lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                break
+            except FileExistsError:
+                try:  # trava velha (processo que caiu)
+                    if time.time() - os.path.getmtime(self._lock_path) > 30:
+                        os.remove(self._lock_path)
+                        continue
+                except OSError:
+                    pass
+                if time.time() - inicio > timeout:
+                    break  # segue sem trava em vez de travar o app
+                time.sleep(0.05)
+        try:
+            yield
+        finally:
+            if fd is not None:
+                os.close(fd)
+                try:
+                    os.remove(self._lock_path)
+                except OSError:
+                    pass
+
+    # -- índice ----------------------------------------------------------
     def _ler_indice(self) -> List[Dict[str, Any]]:
-        with open(self._indice_path, "r", encoding="utf-8") as f:
-            return json.load(f)
+        try:
+            with open(self._indice_path, "r", encoding="utf-8") as f:
+                dados = json.load(f)
+            if isinstance(dados, list):
+                return dados
+        except (OSError, ValueError):
+            pass
+        return self.reconstruir_indice(gravar=False)
 
     def _escrever_indice(self, indice: List[Dict[str, Any]]) -> None:
-        with open(self._indice_path, "w", encoding="utf-8") as f:
-            json.dump(indice, f, ensure_ascii=False, indent=2)
+        self._escrever_atomico(
+            self._indice_path,
+            json.dumps(indice, ensure_ascii=False, indent=2).encode("utf-8"))
 
-    def salvar_caso(self, caso: Caso, pdf_bytes: Optional[bytes] = None) -> None:
-        caso.atualizado_em = datetime.now().isoformat()
-        with open(self._caso_path(caso.numero_caso), "w", encoding="utf-8") as f:
-            json.dump(caso.to_dict(), f, ensure_ascii=False, indent=2)
-        if pdf_bytes:
-            with open(self._pdf_path(caso.numero_caso), "wb") as f:
-                f.write(pdf_bytes)
-        indice = self._ler_indice()
-        indice = [i for i in indice if i["numero_caso"] != caso.numero_caso]
-        indice.insert(0, {
+    @staticmethod
+    def _entrada_indice(caso: Caso) -> Dict[str, Any]:
+        return {
             "numero_caso": caso.numero_caso,
             "nome_cliente": caso.nome_display() or "Sem nome",
             "tipo_caso": caso.tipo_caso,
             "risco": caso.risco_geral(),
             "diligencia": caso.diligencia or "Pendente",
             "criado_em": caso.criado_em,
-        })
-        self._escrever_indice(indice)
+            "atualizado_em": caso.atualizado_em,
+        }
+
+    def reconstruir_indice(self, gravar: bool = True) -> List[Dict[str, Any]]:
+        """Reconstrói o índice lendo os arquivos caso_*.json (recupera um índice
+        corrompido ou casos que ficaram de fora)."""
+        entradas = []
+        for nome in os.listdir(self.base_dir):
+            if nome.startswith("caso_") and nome.endswith(".json"):
+                try:
+                    with open(os.path.join(self.base_dir, nome), "r", encoding="utf-8") as f:
+                        entradas.append(self._entrada_indice(Caso.from_dict(json.load(f))))
+                except (OSError, ValueError, TypeError):
+                    continue
+        entradas.sort(key=lambda e: e.get("criado_em", ""), reverse=True)
+        if gravar:
+            with self._trava():
+                self._escrever_indice(entradas)
+        return entradas
+
+    # -- API pública -----------------------------------------------------
+    def salvar_caso(self, caso: Caso, pdf_bytes: Optional[bytes] = None) -> None:
+        caso.atualizado_em = datetime.now().isoformat()  # precisão total: serve de chave de cache
+        self._escrever_atomico(
+            self._caso_path(caso.numero_caso),
+            json.dumps(caso.to_dict(), ensure_ascii=False, indent=2).encode("utf-8"))
+        if pdf_bytes:
+            self._escrever_atomico(self._pdf_path(caso.numero_caso), pdf_bytes)
+        with self._trava():
+            indice = [i for i in self._ler_indice() if i.get("numero_caso") != caso.numero_caso]
+            entrada = self._entrada_indice(caso)
+            # mantém a ordem "mais recente primeiro" pela data de criação
+            indice.append(entrada)
+            indice.sort(key=lambda e: e.get("criado_em", ""), reverse=True)
+            self._escrever_indice(indice)
 
     def carregar_caso(self, numero_caso: str) -> Optional[Caso]:
+        if not numero_caso_valido(numero_caso):
+            return None
         path = self._caso_path(numero_caso)
         if not os.path.exists(path):
             return None
@@ -716,6 +972,8 @@ class ArmazenamentoLocal:
             return Caso.from_dict(json.load(f))
 
     def carregar_pdf(self, numero_caso: str) -> Optional[bytes]:
+        if not numero_caso_valido(numero_caso):
+            return None
         path = self._pdf_path(numero_caso)
         if not os.path.exists(path):
             return None
@@ -723,196 +981,12 @@ class ArmazenamentoLocal:
             return f.read()
 
     def listar_indice(self) -> List[Dict[str, Any]]:
+        """Todos os dossiês, do mais recente para o mais antigo."""
         return self._ler_indice()
 
     def buscar_por_numero(self, termo: str) -> List[Dict[str, Any]]:
+        """Casos cujo número contém o trecho digitado (maiúsculas e minúsculas não importam)."""
         termo = (termo or "").strip().lower()
         if not termo:
             return []
-        return [i for i in self._ler_indice() if termo in i["numero_caso"].lower()]
-
-
-# ---------------------------------------------------------------------------
-# Geração de PDF do dossiê
-# ---------------------------------------------------------------------------
-
-def _estilos():
-    base = getSampleStyleSheet()
-    base.add(ParagraphStyle(name="TituloCaso", fontSize=18, leading=22, spaceAfter=4,
-                             textColor=colors.HexColor("#3E2A63"), fontName="Helvetica-Bold"))
-    base.add(ParagraphStyle(name="Eyebrow", fontSize=9, leading=11, spaceAfter=10,
-                             textColor=colors.HexColor("#6C4E97"), fontName="Helvetica"))
-    base.add(ParagraphStyle(name="SecaoTitulo", fontSize=13, leading=16, spaceBefore=16, spaceAfter=8,
-                             textColor=colors.HexColor("#3E2A63"), fontName="Helvetica-Bold"))
-    base.add(ParagraphStyle(name="SubTitulo", fontSize=11, leading=14, spaceBefore=10, spaceAfter=4,
-                             textColor=colors.HexColor("#6C4E97"), fontName="Helvetica-Bold"))
-    base.add(ParagraphStyle(name="Campo", fontSize=10, leading=14, spaceAfter=4,
-                             textColor=colors.HexColor("#2A2035"), fontName="Helvetica"))
-    return base
-
-
-def _tabela_padrao(dados) -> Table:
-    tabela = Table(dados, repeatRows=1, hAlign="LEFT")
-    tabela.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#3E2A63")),
-        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-        ("FONTSIZE", (0, 0), (-1, -1), 8),
-        ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#C9B6DE")),
-        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F3EADA")]),
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-    ]))
-    return tabela
-
-
-def gerar_pdf_dossie(caso: Caso, grafico_png: Optional[bytes] = None) -> bytes:
-    buf = BytesIO()
-    doc = SimpleDocTemplate(buf, pagesize=A4, topMargin=1.5 * cm, bottomMargin=1.5 * cm,
-                             leftMargin=1.7 * cm, rightMargin=1.7 * cm)
-    styles = _estilos()
-    story = []
-
-    story.append(Paragraph("SENTINELA PLD &mdash; DOSSIÊ", styles["Eyebrow"]))
-    story.append(Paragraph(f"Caso {caso.numero_caso}", styles["TituloCaso"]))
-    story.append(Paragraph(
-        f"Cliente: <b>{caso.nome_display() or 'Não informado'}</b> &nbsp;|&nbsp; "
-        f"Tipo: {caso.tipo_caso} &nbsp;|&nbsp; Risco geral: <b>{caso.risco_geral()}</b>",
-        styles["Campo"],
-    ))
-    story.append(HRFlowable(width="100%", color=colors.HexColor("#9C82C4"), thickness=1.2))
-
-    # 1. Alerta / Sentença
-    story.append(Paragraph("1. Alerta / Sentença", styles["SecaoTitulo"]))
-    story.append(Paragraph(f"<b>Fator gerador:</b> {caso.fator_gerador or '—'}", styles["Campo"]))
-    story.append(Paragraph(f"<b>Sentença:</b> {caso.sentenca or '—'}", styles["Campo"]))
-
-    # 2. KYC
-    story.append(Paragraph("2. KYC — Know Your Customer", styles["SecaoTitulo"]))
-    if caso.eh_pj():
-        story.append(Paragraph(f"<b>Empresa:</b> {caso.nome_empresa or '—'}", styles["Campo"]))
-        story.append(Paragraph(f"<b>Data de abertura:</b> {caso.data_abertura or '—'} &nbsp;|&nbsp; "
-                                f"<b>Ramo:</b> {caso.ramo_atividade or '—'} &nbsp;|&nbsp; "
-                                f"<b>Porte:</b> {caso.porte or '—'}", styles["Campo"]))
-        story.append(Paragraph(f"<b>Faturamento presumido:</b> {caso.faturamento_presumido or '—'} &nbsp;|&nbsp; "
-                                f"<b>Endereço:</b> {caso.endereco or '—'}", styles["Campo"]))
-        story.append(Paragraph(f"<b>Presença online:</b> {caso.presenca_online}"
-                                + (f" — {caso.presenca_online_detalhe}" if caso.presenca_online_detalhe else ""), styles["Campo"]))
-        story.append(Paragraph(f"<b>Fachada da empresa:</b> {caso.fachada_empresa}"
-                                + (f" — {caso.fachada_empresa_detalhe}" if caso.fachada_empresa_detalhe else ""), styles["Campo"]))
-        if caso.socios:
-            story.append(Paragraph("Sócios", styles["SubTitulo"]))
-            for s in caso.socios:
-                risco_socio = "ALTO" if s.pep == "Sim" else ("MÉDIO" if s.regiao_risco == "Sim" else "BAIXO")
-                story.append(Paragraph(
-                    f"<b>{s.nome or 'Sócio'}</b> · {s.idade or '—'} anos · {s.endereco or '—'} · "
-                    f"PEP: {s.pep} · Região de risco: {s.regiao_risco} · risco <b>{risco_socio}</b>",
-                    styles["Campo"],
-                ))
-    else:
-        story.append(Paragraph(f"<b>Nome:</b> {caso.nome_cliente or '—'} &nbsp;|&nbsp; "
-                                f"<b>Idade:</b> {caso.idade or '—'} &nbsp;|&nbsp; "
-                                f"<b>Cidade/Estado:</b> {caso.cidade_estado or '—'}", styles["Campo"]))
-        story.append(Paragraph(f"<b>Última atualização cadastral:</b> {caso.ultima_atualizacao_cadastral or '—'} &nbsp;|&nbsp; "
-                                f"<b>Profissão informada:</b> {caso.profissao_informada or '—'}", styles["Campo"]))
-        story.append(Paragraph(f"<b>Renda presumida:</b> {caso.renda_presumida or '—'} &nbsp;|&nbsp; "
-                                f"<b>Registro profissional:</b> {caso.registro_profissional or '—'}", styles["Campo"]))
-        story.append(Paragraph(f"<b>Registro societário:</b> {caso.registro_societario}", styles["Campo"]))
-        if caso.registro_societario == "Sim":
-            story.append(Paragraph(
-                f"&nbsp;&nbsp;{caso.reg_soc_razao_social or '—'} · aberta em {caso.reg_soc_data_abertura or '—'} · "
-                f"{caso.reg_soc_situacao_cadastral or '—'} · {caso.reg_soc_ramo_atividade or '—'}",
-                styles["Campo"],
-            ))
-    if caso.rep_nome:
-        story.append(Paragraph("Representante legal (Under 18)", styles["SubTitulo"]))
-        story.append(Paragraph(f"{caso.rep_nome} · renda presumida {caso.rep_renda_presumida or '—'} · "
-                                f"reg. profissional {caso.rep_reg_prof or '—'}", styles["Campo"]))
-
-    story.append(Paragraph(
-        f"<b>Região de risco:</b> {caso.regiao_risco}"
-        + (f" — {caso.tipo_regiao_risco}" if caso.tipo_regiao_risco else "")
-        + f" &nbsp;|&nbsp; <b>PEP:</b> {caso.pep}"
-        + (f" ({caso.tipo_pep})" if caso.tipo_pep else ""),
-        styles["Campo"],
-    ))
-    story.append(Paragraph(
-        f"<b>Mídia negativa:</b> {caso.midia_negativa}"
-        + (f" — {caso.midia_negativa_detalhe}" if caso.midia_negativa_detalhe else "")
-        + f" &nbsp;|&nbsp; <b>Histórico PLD:</b> {caso.historico_pld}"
-        + f" &nbsp;|&nbsp; <b>Histórico de fraude:</b> {caso.historico_fraude}",
-        styles["Campo"],
-    ))
-    if caso.outras_info:
-        story.append(Paragraph(f"<b>Outras informações:</b> {caso.outras_info}", styles["Campo"]))
-
-    # 3. Resumo de movimentações
-    story.append(Paragraph("3. Resumo de Movimentações", styles["SecaoTitulo"]))
-    story.append(Paragraph(f"<b>Período:</b> {caso.mov_periodo or '—'}", styles["Campo"]))
-    story.append(Paragraph(
-        f"<b>Total de créditos:</b> {caso.mov_total_credito or '—'} ({caso.mov_total_contrapartes_credito or '—'} contrapartes) "
-        f"&nbsp;|&nbsp; <b>Total de débitos:</b> {caso.mov_total_debito or '—'} ({caso.mov_total_contrapartes_debito or '—'} contrapartes)",
-        styles["Campo"],
-    ))
-
-    for titulo, lista in (("Principais contrapartes de crédito", caso.contrapartes_credito),
-                           ("Principais contrapartes de débito", caso.contrapartes_debito)):
-        if lista:
-            story.append(Paragraph(titulo, styles["SubTitulo"]))
-            dados = [["Tipo", "Nome", "%", "Valor", "Transações", "Detalhe"]]
-            for c in lista:
-                detalhe = c.registro_profissional or c.ramo_atividade or "—"
-                dados.append([c.tipo, c.nome or "—", c.porcentagem or "—", c.valor or "—",
-                               c.num_transacoes or "—", detalhe])
-            story.append(_tabela_padrao(dados))
-
-    if caso.outras_movimentacoes:
-        story.append(Paragraph("Outras movimentações", styles["SubTitulo"]))
-        for m in caso.outras_movimentacoes:
-            story.append(Paragraph(f"<b>{m.tipo}:</b> {m.info or '—'}", styles["Campo"]))
-
-    # 4. Thundera - AML 360
-    story.append(Paragraph("4. Thundera — AML 360", styles["SecaoTitulo"]))
-    story.append(Paragraph(f"<b>Arredondamento:</b> {caso.comp_arredondamento}", styles["Campo"]))
-    for a in caso.arredondamento_itens:
-        story.append(Paragraph(f"&nbsp;&nbsp;{a.cred_deb}: {a.quantidade or '—'} transações, valores como {a.valor or '—'}", styles["Campo"]))
-    story.append(Paragraph(f"<b>Mensagens Pix:</b> {caso.comp_pix}", styles["Campo"]))
-    for p in caso.pix_itens:
-        story.append(Paragraph(f"&nbsp;&nbsp;{p.cred_deb}: {p.quantidade or '—'} mensagens — \"{p.mensagem or '—'}\"", styles["Campo"]))
-    story.append(Paragraph(f"<b>Timeline de transferências:</b> {caso.comp_evasao or '—'}", styles["Campo"]))
-    if grafico_png:
-        story.append(Spacer(1, 6))
-        story.append(RLImage(BytesIO(grafico_png), width=15 * cm, height=15 * cm * (2.6 / 6.2)))
-    if caso.comp_mudanca_comportamento:
-        story.append(Paragraph(f"<b>Mudança de comportamento:</b> {caso.comp_mudanca_comportamento}", styles["Campo"]))
-    story.append(Paragraph(f"<b>Data de abertura da conta / último reporte:</b> {caso.comp_data_abertura_ultimo_reporte or '—'}", styles["Campo"]))
-
-    # 5. Resolução
-    story.append(Paragraph("5. Resolução", styles["SecaoTitulo"]))
-    story.append(Paragraph(f"<b>Parecer final:</b> {caso.parecer_final or '—'}", styles["Campo"]))
-    story.append(Paragraph(f"<b>Alíneas:</b> {caso.alineas or '—'}", styles["Campo"]))
-    if caso.jurisprudencias_selecionadas:
-        story.append(Paragraph("<b>Jurisprudências:</b> " + "; ".join(caso.jurisprudencias_selecionadas), styles["Campo"]))
-    if caso.razoes_clear_selecionadas:
-        story.append(Paragraph("<b>Razões de Clear:</b> " + "; ".join(caso.razoes_clear_selecionadas), styles["Campo"]))
-    if caso.razoes_cancelamento_selecionadas:
-        story.append(Paragraph("<b>Razões de Cancelamento:</b> " + "; ".join(caso.razoes_cancelamento_selecionadas), styles["Campo"]))
-    story.append(Paragraph(f"<b>Diligência:</b> {caso.diligencia or 'Pendente'}", styles["Campo"]))
-
-    # 6. Scorecard de qualidade
-    if caso.scorecard_drivers_marcados or caso.scorecard_feedback:
-        nota = calcular_nota_scorecard(caso.scorecard_tipo, caso.scorecard_drivers_marcados)
-        story.append(Paragraph(f"6. Avaliação de Qualidade — {caso.scorecard_tipo}", styles["SecaoTitulo"]))
-        story.append(Paragraph(f"<b>Nota final:</b> {nota:.1f}%", styles["Campo"]))
-        if caso.scorecard_drivers_marcados:
-            story.append(Paragraph("<b>Drivers marcados:</b> " + "; ".join(caso.scorecard_drivers_marcados), styles["Campo"]))
-        if caso.scorecard_feedback:
-            story.append(Paragraph(f"<b>Feedback:</b> {caso.scorecard_feedback}", styles["Campo"]))
-
-    story.append(Spacer(1, 14))
-    story.append(HRFlowable(width="100%", color=colors.HexColor("#C9B6DE"), thickness=0.8))
-    story.append(Paragraph(
-        f"Gerado em {datetime.now().strftime('%d/%m/%Y %H:%M')} &middot; Uso interno &middot; Confidencial",
-        styles["Eyebrow"],
-    ))
-
-    doc.build(story)
-    return buf.getvalue()
+        return [i for i in self._ler_indice() if termo in str(i.get("numero_caso", "")).lower()]

@@ -1,0 +1,19 @@
+# Tema do Sentinela (paleta bege/roxo do artefato original).
+# O CSS fino (cartões, botões, tabs) está em estilo.py; aqui ficam só as cores
+# base, para que checkboxes, multiselects e foco usem o roxo da marca.
+[theme]
+primaryColor = "#6C4E97"
+backgroundColor = "#EEE3CE"
+secondaryBackgroundColor = "#F3EADA"
+textColor = "#2A2035"
+font = "sans serif"
+
+[client]
+toolbarMode = "minimal"
+showErrorDetails = false
+
+[browser]
+gatherUsageStats = false
+
+[server]
+maxUploadSize = 5

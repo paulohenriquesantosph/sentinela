@@ -6,6 +6,10 @@ qualidade AML Nupag / AML NuInvest). Gerado automaticamente a partir do
 HTML original para garantir fidelidade -- não foi reescrito à mão.
 """
 
+# Desfechos possíveis do caso (o selo do dossiê muda de cor conforme a escolha:
+# Clear = verde, Reportar = âmbar, Reportar e Cancelar = vermelho, Cancelar = neutro).
+DILIGENCIAS = ["Clear (arquivar)", "Reportar", "Reportar e Cancelar", "Cancelar"]
+
 RAZOES_CLEAR = [
   "Conta com bloqueio judicial",
   "Contrapartes sem risco",
