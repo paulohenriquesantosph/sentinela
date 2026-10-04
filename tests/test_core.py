@@ -147,25 +147,7 @@ class TestTimeline(unittest.TestCase):
         self.assertFalse(aplicar_timeline_ao_caso(Caso("1", "Cripto")))
 
 
-class TestRiscoEValidacao(unittest.TestCase):
-    def test_caso_de_teste_nao_e_mais_baixo(self):
-        # no manual, o risco do caso de teste saía BAIXO (só olhava PEP, região e sócios)
-        c = caso_joao()
-        self.assertEqual(c.risco_geral(), "ALTO")
-        self.assertTrue(any("renda" in d for _, d in c.fatores_risco()))
-
-    def test_caso_limpo_e_baixo(self):
-        c = Caso("1", "Pessoa Física (PF)")
-        self.assertEqual(c.risco_geral(), "BAIXO")
-
-    def test_pep_e_socio(self):
-        c = Caso("1", "Pessoa Jurídica (PJ)")
-        c.socios = [Socio(nome="X", pep="Sim")]
-        self.assertEqual(c.risco_geral(), "ALTO")
-        c = Caso("1", "Pessoa Física (PF)")
-        c.regiao_risco = "Sim"
-        self.assertEqual(c.risco_geral(), "MÉDIO")
-
+class TestValidacao(unittest.TestCase):
     def test_validacao_pf(self):
         faltando = validar_caso(Caso("1", "Pessoa Física (PF)"))
         for campo in ("Nome do Cliente", "Idade", "Renda Presumida do Cliente", "Gênero do cliente", "Período",
@@ -216,7 +198,7 @@ class TestBancoDeDossies(unittest.TestCase):
         self.assertEqual(indice[0]["numero_caso"], "2026-ABC123")
         self.assertEqual(indice[0]["nome_cliente"], "João Paulo Carvalho Dias")
         self.assertEqual(indice[0]["diligencia"], "Reportar e Cancelar")
-        self.assertEqual(indice[0]["risco"], "ALTO")
+        self.assertNotIn("risco", indice[0])  # o dossiê não classifica risco
 
         # busca: exata, por trecho, sem diferenciar caixa, vazia e inexistente
         self.assertEqual(len(self.store.buscar_por_numero("2026-ABC123")), 1)

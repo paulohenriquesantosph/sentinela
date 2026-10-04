@@ -59,14 +59,13 @@ def _pct(v: float) -> str:
 # ---------------------------------------------------------------------------
 
 def cabecalho_html(caso: Caso) -> str:
-    """Cartão do topo: número do caso, nome do cliente, avatar e risco geral."""
+    """Cartão do topo: número do caso, nome do cliente e avatar."""
     avatar = "" if caso.eh_pj() else estilo.avatar_svg(caso.genero)
     return (
         '<div class="sx-info-card" style="padding:14px 22px 16px;">'
         '<div class="sx-dossie-cab">'
         f'<div class="sx-dossie-num">{escape(caso.numero_caso)}</div>'
-        f'<div class="sx-dossie-nome">{avatar}<span>{escape(caso.nome_display() or "Sem nome")}</span>'
-        f'{estilo.chip_risco(caso.risco_geral())}</div>'
+        f'<div class="sx-dossie-nome">{avatar}<span>{escape(caso.nome_display() or "Sem nome")}</span></div>'
         '</div></div>'
     )
 
@@ -119,13 +118,12 @@ def secao_kyc(caso: Caso) -> str:
         corpo += _p(("Nome da empresa", c.nome_empresa), ("Data de abertura", c.data_abertura),
                     ("Ramo de atividade", c.ramo_atividade), ("Porte", c.porte),
                     ("Faturamento presumido", c.faturamento_presumido), ("Endereço", c.endereco))
-        corpo += _p(("Presença online", (c.presenca_online_detalhe or "Sim") if c.presenca_online == "Sim" else "Não"),
-                    ("Fachada da empresa", (c.fachada_empresa_detalhe or "Sim") if c.fachada_empresa == "Sim" else "Não"))
+        corpo += _p(("Presença online", c.presenca_online or "Não"),
+                    ("Fachada da empresa", c.fachada_empresa or "Não"))
         for i, s in enumerate(c.socios, 1):
             corpo += _sub(f"Sócio {i}")
             corpo += _p(("Nome", s.nome), ("Idade", s.idade), ("Endereço", s.endereco),
-                        ("Renda presumida", s.renda_presumida), ("Patrimônio", s.patrimonio),
-                        ("Risco", s.nivel_risco().title()))
+                        ("Renda presumida", s.renda_presumida), ("Patrimônio", s.patrimonio))
             flags: List[Par] = []
             if s.regiao_risco == "Sim":
                 flags.append(("Região de risco", s.tipo_regiao_risco or "Sim"))
@@ -240,22 +238,17 @@ def secao_thundera(caso: Caso, grafico_png: Optional[bytes] = None) -> str:
         corpo += _sub("Timeline de Transferências")
         corpo += ('<div class="sx-pills">'
                   + estilo.pilula("Créditos", _dinheiro(c.mov_total_credito), "gde verde")
-                  + estilo.pilula("Débitos", _dinheiro(c.mov_total_debito), "gde vermelho")
-                  + estilo.pilula("Padrão", c.comp_evasao) + "</div>")
+                  + estilo.pilula("Débitos", _dinheiro(c.mov_total_debito), "gde vermelho") + "</div>")
         png = grafico_png or grafico_do_caso(c)
         if png:
             b64 = base64.b64encode(png).decode("ascii")
             corpo += f'<div class="sx-grafico"><img alt="Timeline de Transferências" src="data:image/png;base64,{b64}"/></div>'
     if c.comp_mudanca_comportamento.strip():
-        corpo += _sub("Mudança de Comportamento")
+        # só os meses e valores movimentados: o dossiê não afirma se houve mudança de comportamento
+        corpo += _sub("Valores Movimentados por Mês")
         corpo += '<div class="sx-mudanca">' + "<br/>".join(
             escape(l) for l in c.comp_mudanca_comportamento.splitlines() if l.strip()) + "</div>"
     corpo += _p(("Data de abertura da conta/data do último reporte", c.comp_data_abertura_ultimo_reporte))
-    fatores = c.fatores_risco()
-    if fatores:
-        corpo += _sub("Fatores considerados no risco geral")
-        corpo += '<div class="sx-texto">' + "<br/>".join(
-            f"&bull; <b>{escape(n.title())}</b> — {escape(d)}" for n, d in fatores) + "</div>"
     return _cartao("4. Thundera - AML 360", corpo)
 
 

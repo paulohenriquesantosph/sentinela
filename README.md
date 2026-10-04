@@ -12,7 +12,7 @@ persistente e compartilhado pelo time.
 | Arquivo | O que é | Precisa editar? |
 |---|---|---|
 | `app.py` | Fluxo das telas (Streamlit): home, tipo de caso, modo, preenchimento por IA, formulário, dossiê com 3 abas e Banco. | Não |
-| `core.py` | Modelo de dados, nota de qualidade, risco geral, narrativa de mudança de comportamento, gráfico e Banco de Dossiês. | Não |
+| `core.py` | Modelo de dados, nota de qualidade, narrativa de mudança de comportamento, gráfico e Banco de Dossiês. | Não |
 | `ia.py` | Preenchimento automático por IA: prompts, regras, normalização e coerência dos dados. | Não |
 | `pdf_dossie.py` | PDF do dossiê (Informações + Resolução + Avaliação). | Não |
 | `dossie_html.py` | Aba "Informações do Caso" em HTML (pílulas, contrapartes, gráfico). | Não |
@@ -222,7 +222,7 @@ Abre em `http://localhost:8501`. Para sair do venv: `deactivate`.
 | Rubrica escolhida à mão | Definida pelo tipo do caso (NuInvest → AML NuInvest; demais → AML Nupag) |
 | Instruções da IA simplificadas | Regras completas: invenção autorizada, profissão informada x registro profissional, 3 a 5 contrapartes principais, percentuais/valores coerentes, termos vagos viram números, outras movimentações só pelo campo próprio |
 | Diligência com 3 opções | 4 opções (Clear, Reportar, Reportar e Cancelar, Cancelar), selo colorido |
-| Risco olhava só PEP, região e sócios | Considera também históricos, mídia negativa, contrapartes, Thundera e compatibilidade com a renda/faturamento; os fatores aparecem no dossiê |
+| Dossiê classificava o risco do caso | Removido: o dossiê traz só as informações do caso; o risco é definido pelo analista na resolução |
 | Narrativa usava o mês de pico informado | Pico no 1º mês do período; 5 meses anteriores com os valores-base do original |
 | Resolução e Avaliação não eram incluídas no PDF do dossiê | PDF completo traz as 3 abas e é regerado a cada salvamento |
 

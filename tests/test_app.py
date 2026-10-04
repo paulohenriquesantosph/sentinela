@@ -159,7 +159,6 @@ class TestGerarDossie(BaseApp):
         caso = self.store.carregar_caso(numero)
         self.assertTrue(caso.eh_pj())
         self.assertEqual(caso.socios[0].nome, "Maria Souza")
-        self.assertEqual(caso.risco_geral(), "ALTO")
 
     def test_under18_e_nuinvest_e_cripto(self):
         for indice, tipo in ((2, "Cripto"), (3, "NuInvest"), (4, "Under 18")):
@@ -285,6 +284,131 @@ class TestIA(BaseApp):
             self.clicar(at, "ia_preencher")
             self.assertEqual(at.session_state.tela, "preenchimento_ia")
             self.assertIn("401", at.session_state.ia_erro)
+
+
+class TestIAPerguntasKYC(BaseApp):
+    def _dados(self):
+        return {"kyc": {"nome": "Ana Lima", "idade": "30", "cidadeEstado": "",
+                        "regiaoRisco": "Sim", "pep": "Sim", "tipoPep": "PEP Titular", "midiaNegativa": "Sim"},
+                "movimentacoes": {"periodo": "01/04/2026 até 30/06/2026", "totalCredito": "R$1.000,00",
+                                  "totalDebito": "R$900,00"}}
+
+    def test_pergunta_o_que_faltou_e_preenche_o_formulario(self):
+        with mock.patch("ia.extrair_dados_do_texto", return_value=self._dados()):
+            at = self.app()
+            self.clicar(at, "home_novo")
+            self.clicar(at, "tipo_0")
+            self.clicar(at, "modo_auto")
+            at.text_input(key="ia_fator").set_value("Transfer In")
+            at.text_area(key="ia_sentenca").set_value("Alerta.")
+            at.text_area(key="ia_resumo").set_value("Ana, região de risco, PEP e mídia negativa.")
+            at.run()
+            self.clicar(at, "ia_preencher")
+            # ficou na tela, perguntando só o que faltou (o tipo de PEP já veio)
+            self.assertEqual(at.session_state.tela, "preenchimento_ia")
+            chaves = [w.key for w in at.text_input if w.key.startswith("ia_kyc_")]
+            self.assertEqual(sorted(chaves), ["ia_kyc_cidade_estado", "ia_kyc_descricao_pep",
+                                              "ia_kyc_midia_negativa_detalhe"])
+            self.assertEqual([w.key for w in at.selectbox if w.key.startswith("ia_kyc_")],
+                             ["ia_kyc_tipo_regiao_risco"])
+            # sem responder, não avança
+            self.clicar(at, "ia_preencher")
+            self.assertEqual(at.session_state.tela, "preenchimento_ia")
+            self.assertIn("Cidade/Estado", at.session_state.ia_erro)
+            at.text_input(key="ia_kyc_cidade_estado").set_value("Tabatinga/AM")
+            at.selectbox(key="ia_kyc_tipo_regiao_risco").set_value("Região de Fronteira")
+            at.text_input(key="ia_kyc_descricao_pep").set_value("Vereadora, carência até 2028")
+            at.text_input(key="ia_kyc_midia_negativa_detalhe").set_value("g1.com/x, 10/05/2026, G1")
+            at.run()
+            self.clicar(at, "ia_preencher")
+            self.assertEqual(at.session_state.tela, "formulario", at.session_state.ia_erro)
+            self.assertEqual(at.text_input(key="f_cidade").value, "Tabatinga/AM")
+            self.assertEqual(at.selectbox(key="f_regiao").value, "Sim")
+            self.assertEqual(at.selectbox(key="f_tipo_regiao").value, "Região de Fronteira")
+            self.assertEqual(at.selectbox(key="f_pep").value, "Sim")
+            self.assertEqual(at.text_input(key="f_desc_pep").value, "Vereadora, carência até 2028")
+            self.assertEqual(at.text_input(key="f_midia_d").value, "g1.com/x, 10/05/2026, G1")
+
+    def test_pergunta_detalhes_das_contrapartes(self):
+        d = {"kyc": {"nome": "Ana Lima", "idade": "30"},
+             "movimentacoes": {"periodo": "01/04/2026 até 30/06/2026", "totalCredito": "R$1.000,00",
+                               "totalDebito": "R$900,00",
+                               "contrapartesCredito": [
+                                   {"tipo": "Pessoa Física", "nome": "João", "porcentagem": "20%", "pep": "Sim"},
+                                   {"tipo": "Pessoa Física", "nome": "", "porcentagem": "10%", "pep": "Sim"}]}}
+        with mock.patch("ia.extrair_dados_do_texto", return_value=d):
+            at = self.app()
+            self.clicar(at, "home_novo")
+            self.clicar(at, "tipo_0")
+            self.clicar(at, "modo_auto")
+            at.text_input(key="ia_fator").set_value("Transfer In")
+            at.text_area(key="ia_sentenca").set_value("Alerta.")
+            at.text_area(key="ia_resumo").set_value("Duas contrapartes de crédito são PEP.")
+            at.run()
+            self.clicar(at, "ia_preencher")
+            self.assertEqual(at.session_state.tela, "preenchimento_ia")
+            self.assertEqual(sorted(w.key for w in at.text_input if w.key.startswith("ia_kyc_")),
+                             ["ia_kyc_cp__cred__0__pep_detalhe", "ia_kyc_cp__cred__1__pep_detalhe"])
+            at.text_input(key="ia_kyc_cp__cred__0__pep_detalhe").set_value("Vereador, carência até 2028")
+            at.text_input(key="ia_kyc_cp__cred__1__pep_detalhe").set_value("Secretária estadual")
+            at.run()
+            self.clicar(at, "ia_preencher")
+            self.assertEqual(at.session_state.tela, "formulario", at.session_state.ia_erro)
+            rids = at.session_state["L_cred"]
+            self.assertEqual(len(rids), 2)
+            self.assertEqual(at.text_input(key=f"r_cred_{rids[0]}_pep_d").value, "Vereador, carência até 2028")
+            self.assertEqual(at.text_input(key=f"r_cred_{rids[1]}_pep_d").value, "Secretária estadual")
+
+
+    def test_pj_pede_dados_da_empresa_e_pergunta_socios(self):
+        d = {"kyc": {"nomeEmpresa": "Padaria Estrela", "dataAbertura": "01/02/2020", "ramoAtividade": "Padaria",
+                     "porte": "ME", "faturamentoPresumido": "R$80.000,00", "endereco": "Rua A, 10",
+                     "presencaOnline": "Sim", "fachadaEmpresa": "Sim",
+                     "socios": [{"nome": "Maria", "pep": "Sim", "tipoPep": "PEP Titular"},
+                                {"nome": "", "pep": "Sim", "tipoPep": "PEP Titular", "descricaoPep": "Prefeito"}]},
+             "movimentacoes": {"periodo": "01/04/2026 até 30/06/2026", "totalCredito": "R$1.000,00",
+                               "totalDebito": "R$900,00"}}
+        with mock.patch("ia.extrair_dados_do_texto", return_value=d):
+            at = self.app()
+            self.clicar(at, "home_novo")
+            self.clicar(at, "tipo_1")
+            self.clicar(at, "modo_auto")
+            self.assertIn("Presença Online", _html(at))  # instrução com os dados da PJ
+            at.text_input(key="ia_fator").set_value("Transfer In")
+            at.text_area(key="ia_sentenca").set_value("Alerta.")
+            at.text_area(key="ia_resumo").set_value("Padaria, dois sócios PEP.")
+            at.run()
+            self.clicar(at, "ia_preencher")
+            self.assertEqual(at.session_state.tela, "preenchimento_ia")
+            self.assertEqual([w.key for w in at.text_input if w.key.startswith("ia_kyc_")],
+                             ["ia_kyc_so__0__descricao_pep"])
+            at.text_input(key="ia_kyc_so__0__descricao_pep").set_value("Vereadora")
+            at.run()
+            self.clicar(at, "ia_preencher")
+            self.assertEqual(at.session_state.tela, "formulario", at.session_state.ia_erro)
+            self.assertEqual(at.selectbox(key="f_pres_online").value, "Sim")
+            self.assertEqual(at.selectbox(key="f_fachada").value, "Sim")
+            self.assertFalse([w for w in at.text_input if w.key in ("f_pres_online_d", "f_fachada_d")])
+            rids = at.session_state["L_so"]
+            self.assertEqual(at.text_input(key=f"r_so_{rids[0]}_desc_pep").value, "Vereadora")
+            self.assertEqual(at.text_input(key=f"r_so_{rids[1]}_desc_pep").value, "Prefeito")
+
+
+    def test_sem_faltas_vai_direto_ao_formulario(self):
+        d = self._dados()
+        d["kyc"].update({"cidadeEstado": "Tabatinga/AM", "tipoRegiaoRisco": "Região de Fronteira",
+                         "descricaoPep": "Vereadora", "midiaNegativaDetalhe": "G1, 10/05/2026"})
+        with mock.patch("ia.extrair_dados_do_texto", return_value=d):
+            at = self.app()
+            self.clicar(at, "home_novo")
+            self.clicar(at, "tipo_0")
+            self.clicar(at, "modo_auto")
+            at.text_input(key="ia_fator").set_value("Transfer In")
+            at.text_area(key="ia_sentenca").set_value("Alerta.")
+            at.text_area(key="ia_resumo").set_value("Ana, tudo informado.")
+            at.run()
+            self.clicar(at, "ia_preencher")
+            self.assertEqual(at.session_state.tela, "formulario", at.session_state.ia_erro)
 
 
 if __name__ == "__main__":

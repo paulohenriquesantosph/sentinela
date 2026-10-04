@@ -396,9 +396,6 @@ h1,h2,h3,h4{ font-family:var(--serif) !important; color:var(--purple-deep) !impo
 .sx-texto{ font-family:var(--sans); font-size:15px; line-height:1.55; color:var(--ink); margin:2px 0 8px; white-space:pre-wrap; }
 .sx-linha-sep{ border:none; border-top:1px dashed var(--purple-soft); margin:12px 0; opacity:.8; }
 .sx-resto{ font-family:var(--sans); font-size:14px; color:var(--ink); margin:2px 0 10px; }
-.sx-chip{ display:inline-block; font-family:var(--mono); font-size:10.5px; font-weight:600; letter-spacing:.08em; text-transform:uppercase;
-  border-radius:20px; padding:3px 10px; border:1.5px solid currentColor; vertical-align:middle; margin-left:10px; }
-.sx-chip.baixo{ color:var(--risk-baixo); } .sx-chip.medio{ color:var(--risk-medio); } .sx-chip.alto{ color:var(--risk-alto); }
 .sx-grafico img{ width:100%; height:auto; display:block; }
 .sx-mudanca{ font-family:var(--sans); font-size:15px; line-height:1.6; color:var(--ink); }
 
@@ -679,11 +676,6 @@ def avatar_svg(genero: str) -> str:
                  '<rect x="11.9" y="20" width="3.6" height="9" rx="1.4" fill="#2A2035"/>')
     svg = f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 22 30">{corpo}</svg>'
     return f'<img class="sx-avatar" alt="" src="data:image/svg+xml;utf8,{quote(svg, safe="")}"/>'
-
-
-def chip_risco(nivel: str) -> str:
-    cls = {"BAIXO": "baixo", "MÉDIO": "medio", "ALTO": "alto"}.get(nivel, "baixo")
-    return f'<span class="sx-chip {cls}">Risco {escape(nivel)}</span>'
 
 
 def pilula(rotulo: str, valor: str, extra: str = "") -> str:

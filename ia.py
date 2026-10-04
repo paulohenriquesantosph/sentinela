@@ -55,8 +55,11 @@ class ErroExtracaoIA(Exception):
 # Prompts (dois modelos de resposta: PJ e os demais tipos)
 # ---------------------------------------------------------------------------
 
-_MINI_KYC = ('"registroSocietario": "Sim ou Não", "regiaoRisco": "Sim ou Não", "pep": "Sim ou Não", '
-             '"historicoPld": "Sim ou Não", "historicoFraude": "Sim ou Não", "midiaNegativa": "Sim ou Não"')
+_MINI_KYC = ('"registroSocietario": "Sim ou Não", "registroSocietarioDetalhe": "razão social, data de abertura, '
+             'situação cadastral e ramo", "regiaoRisco": "Sim ou Não", "regiaoRiscoDetalhe": "cidade/estado e risco", '
+             '"pep": "Sim ou Não", "pepDetalhe": "tipo de PEP, descrição e carência", "historicoPld": "Sim ou Não", '
+             '"historicoPldDetalhe": "", "historicoFraude": "Sim ou Não", "historicoFraudeDetalhe": "", '
+             '"midiaNegativa": "Sim ou Não", "midiaNegativaDetalhe": "link (se houver), data e fonte"')
 
 _CONTRAPARTE_PF = ('{"tipo": "Pessoa Física", "porcentagem": "14%", "valor": "R$70.000,00", "numTransacoes": "23", '
                    '"nome": "", "idade": "", "cidadeEstado": "", "rendaPresumida": "R$X,00", '
@@ -93,7 +96,7 @@ SCHEMA_EXTRACAO_PF = (
     '    "registroSocietario": "Sim ou Não",\n'
     '    "registroSocietarioDetalhes": {"razaoSocial": "", "dataAbertura": "DD/MM/AAAA", "situacaoCadastral": "", "ramoAtividade": ""},\n'
     '    "regiaoRisco": "Sim ou Não",\n'
-    '    "tipoRegiaoRisco": "Região de Fronteira ou Região de Extração Mineral e/ou de Extração de Madeira ou Outras Regiões de Risco",\n'
+    '    "tipoRegiaoRisco": "Região de Fronteira ou Região de Extração Mineral e/ou de Extração de Madeira ou Outras Regiões de Risco",\n    "descricaoRegiaoRisco": "nome da região, só se for Outras Regiões de Risco",\n'
     '    "pep": "Sim ou Não", "tipoPep": "PEP Titular ou PEP Relacionado", "descricaoPep": "",\n'
     '    "historicoPld": "Sim ou Não", "historicoPldDetalhe": "",\n'
     '    "historicoFraude": "Sim ou Não", "historicoFraudeDetalhe": "",\n'
@@ -111,15 +114,16 @@ SCHEMA_EXTRACAO_PJ = (
     '  "kyc": {\n'
     '    "nomeEmpresa": "", "dataAbertura": "DD/MM/AAAA", "ramoAtividade": "", "porte": "",\n'
     '    "faturamentoPresumido": "R$X,00", "endereco": "",\n'
-    '    "presencaOnline": "Sim ou Não", "presencaOnlineDetalhe": "",\n'
-    '    "fachadaEmpresa": "Sim ou Não", "fachadaEmpresaDetalhe": "",\n'
+    '    "presencaOnline": "Sim ou Não", "fachadaEmpresa": "Sim ou Não",\n'
     '    "regiaoRisco": "Sim ou Não",\n'
-    '    "tipoRegiaoRisco": "Região de Fronteira ou Região de Extração Mineral e/ou de Extração de Madeira ou Outras Regiões de Risco",\n'
+    '    "tipoRegiaoRisco": "Região de Fronteira ou Região de Extração Mineral e/ou de Extração de Madeira ou Outras Regiões de Risco",\n    "descricaoRegiaoRisco": "nome da região, só se for Outras Regiões de Risco",\n'
     '    "pep": "Sim ou Não", "historicoPld": "Sim ou Não", "historicoFraude": "Sim ou Não",\n'
     '    "midiaNegativa": "Sim ou Não", "outrasInformacoes": "",\n'
     '    "socios": [{"nome": "", "idade": "", "endereco": "", "rendaPresumida": "R$X,00", "patrimonio": "R$X,00", '
-    '"regiaoRisco": "Sim ou Não", "pep": "Sim ou Não", "tipoPep": "PEP Titular ou PEP Relacionado", '
-    '"historicoPld": "Sim ou Não", "historicoFraude": "Sim ou Não", "midiaNegativa": "Sim ou Não"}]\n'
+    '"regiaoRisco": "Sim ou Não", "tipoRegiaoRisco": "Região de Fronteira ou Região de Extração Mineral e/ou de Extração de Madeira ou Outras Regiões de Risco", '
+    '"pep": "Sim ou Não", "tipoPep": "PEP Titular ou PEP Relacionado", "descricaoPep": "cargo e carência", '
+    '"historicoPld": "Sim ou Não", "historicoPldDetalhe": "", "historicoFraude": "Sim ou Não", '
+    '"historicoFraudeDetalhe": "", "midiaNegativa": "Sim ou Não", "midiaNegativaDetalhe": "link (se houver), data e fonte"}]\n'
     '  },\n  '
     + _BLOCO_MOVIMENTACOES +
     '}'
@@ -139,13 +143,16 @@ REGRAS (siga todas):
 10. A seção outrasMovimentacoes (saques, boletos, cartões, empréstimos, criptomoedas, investimentos) vem EXCLUSIVAMENTE do bloco "OUTRAS MOVIMENTAÇÕES (NÃO BANCÁRIAS)" da mensagem. O que estiver no bloco "RESUMO DO CASO" não vai para essa seção; se o bloco de outras movimentações estiver vazio, devolva [].
 11. Se não houver período no texto, deixe periodo "". Seja conciso nos campos de texto livre.
 12. Com INVENÇÃO AUTORIZADA: SIM e pedido de contrapartes aleatórias, crie nomes, idades, cidades/estados, rendas e cargos plausíveis, OBEDECENDO ao perfil pedido. Ex.: "diversas pessoas físicas sem capacidade financeira elevada" -> rendaPresumida BAIXA e variada em cada contraparte (ex.: R$1.300,00 a R$3.500,00), coerente com o cargo. Se o texto não disser as profissões, crie cargos aleatórios compatíveis com o perfil (ex.: auxiliar administrativo, vendedor, atendente, motorista, diarista) em registroProfissional. Perfil de empresa (PJ): ramo, porte e faturamento compatíveis com o pedido. Nunca contrarie uma instrução dada.
-13. Saída: APENAS um objeto JSON válido, sem markdown, sem crases e sem texto antes ou depois.
+13. KYC: registroSocietario = "Sim" só se o texto disser que o cliente tem registro societário; nesse caso preencha registroSocietarioDetalhes (razaoSocial, dataAbertura, situacaoCadastral, ramoAtividade) com o que o texto trouxer. Região de risco: se o texto indicar cidade/estado da região, coloque em cidadeEstado (PF); se o tipo for "Outras Regiões de Risco", descreva a região em descricaoRegiaoRisco. PEP: tipoPep e descricaoPep (cargo e carência). Mídia negativa, histórico de PLD e de fraude: detalhe (link, data e fonte, quando houver) em seus campos "...Detalhe". Nunca invente detalhes que o texto não traz (sem INVENÇÃO AUTORIZADA).
+14. outrasInformacoes: coloque aqui TODA informação adicional de KYC que o texto trouxer e que não tenha campo próprio (compartilhamento de dispositivo, redes sociais, processos, dados específicos de NuInvest/Crypto e outras informações não convencionais), UMA INFORMAÇÃO POR LINHA, separadas por quebra de linha, no formato "Rótulo: valor". Não repita o que já tem campo próprio.
+15. Contrapartes com sinais de KYC (sócia de empresa/registro societário, PEP, mídia negativa, histórico de PLD, histórico de fraude, região de risco): marque "Sim" no item de CADA contraparte envolvida e preencha o campo "...Detalhe" correspondente com o que o texto trouxer. Se o texto indicar MAIS DE UMA contraparte com o sinal (ex.: "3 contrapartes são PEP"), CRIE uma entrada por contraparte na lista (mesmo passando de 5 entradas), cada uma com o sinal marcado, mantendo valores e porcentagens coerentes com o total. Sem INVENÇÃO AUTORIZADA, deixe nome e demais dados dessas contrapartes em branco; com INVENÇÃO AUTORIZADA, crie-os respeitando a regra 12. Nunca invente os detalhes dos sinais.
+16. Saída: APENAS um objeto JSON válido, sem markdown, sem crases e sem texto antes ou depois.
 """
 
 _REGRAS_PJ = """
 REGRAS ESPECÍFICAS DE PESSOA JURÍDICA:
-- O titular do caso é uma EMPRESA: preencha nomeEmpresa, dataAbertura, ramoAtividade, porte, faturamentoPresumido e endereco (e presença online / fachada, se o texto falar).
-- Informações sobre os sócios vão em "socios" (nome, idade, endereco, rendaPresumida, patrimonio, regiaoRisco, pep, historicoPld, historicoFraude, midiaNegativa). Não crie sócios que o texto não cite.
+- O titular do caso é uma EMPRESA: preencha nomeEmpresa, dataAbertura, ramoAtividade, porte, faturamentoPresumido e endereco. Presença online e fachada da empresa são só "Sim" ou "Não" (presencaOnline, fachadaEmpresa), sem detalhes; deixe "" se o texto não falar.
+- Informações sobre os sócios vão em "socios" (nome, idade, endereco, rendaPresumida, patrimonio, regiaoRisco, tipoRegiaoRisco, pep, tipoPep, descricaoPep, historicoPld, historicoFraude, midiaNegativa e os campos "...Detalhe"). Marque "Sim" em cada sócio envolvido e preencha só os detalhes que o texto trouxer. Não crie sócios que o texto não cite, EXCETO quando o texto indicar mais de um sócio com um sinal (ex.: "2 sócios são PEP"): aí CRIE uma entrada por sócio, cada uma com o sinal marcado; sem INVENÇÃO AUTORIZADA deixe nome e demais dados em branco, com INVENÇÃO AUTORIZADA crie-os. Nunca invente os detalhes dos sinais.
 - Não preencha campos de pessoa física do titular (nome, idade, renda).
 """
 
@@ -535,8 +542,11 @@ def _mapear_contrapartes(lista: Any) -> List[ContraparteMovimentacao]:
 def _mapear_socios(lista: Any) -> List[Socio]:
     out: List[Socio] = []
     for s in (lista if isinstance(lista, list) else []):
-        if not isinstance(s, dict) or not _txt(s.get("nome")):
+        if not isinstance(s, dict):
             continue
+        sinais = ("regiaoRisco", "pep", "historicoPld", "historicoFraude", "midiaNegativa")
+        if not _txt(s.get("nome")) and not any(_simnao(s.get(k)) == "Sim" for k in sinais):
+            continue  # sócio sem nome só entra se carregar algum sinal de KYC
         socio = Socio(
             nome=_txt(s.get("nome")), idade=_numero(s.get("idade")), endereco=_txt(s.get("endereco")),
             renda_presumida=_dinheiro(s.get("rendaPresumida")), patrimonio=_dinheiro(s.get("patrimonio")),
@@ -545,7 +555,7 @@ def _mapear_socios(lista: Any) -> List[Socio]:
                              ("historico_fraude", "historicoFraude"), ("midia_negativa", "midiaNegativa")):
             setattr(socio, campo, _simnao(s.get(chave)) or "Não")
         socio.tipo_regiao_risco = _tipo_regiao(s.get("tipoRegiaoRisco")) if socio.regiao_risco == "Sim" else ""
-        socio.tipo_pep = _tipo_pep(s.get("tipoPep")) or (TIPOS_PEP[0] if socio.pep == "Sim" else "")
+        socio.tipo_pep = _tipo_pep(s.get("tipoPep")) if socio.pep == "Sim" else ""
         socio.descricao_pep = _txt(s.get("descricaoPep"))
         for campo in ("historico_pld", "historico_fraude", "midia_negativa"):
             chave = {"historico_pld": "historicoPld", "historico_fraude": "historicoFraude",
@@ -598,9 +608,7 @@ def aplicar_dados_extraidos(caso: Caso, dados: Dict[str, Any], hoje: Optional[da
         _set(caso, "faturamento_presumido", _dinheiro(_pick(kyc, "faturamentoPresumido", "faturamento")))
         _set(caso, "endereco", _txt(kyc.get("endereco")))
         _set(caso, "presenca_online", _simnao(kyc.get("presencaOnline")))
-        _set(caso, "presenca_online_detalhe", _txt(kyc.get("presencaOnlineDetalhe")))
         _set(caso, "fachada_empresa", _simnao(kyc.get("fachadaEmpresa")))
-        _set(caso, "fachada_empresa_detalhe", _txt(kyc.get("fachadaEmpresaDetalhe")))
         socios = _mapear_socios(kyc.get("socios"))
         if socios:
             caso.socios = socios
@@ -633,17 +641,20 @@ def aplicar_dados_extraidos(caso: Caso, dados: Dict[str, Any], hoje: Optional[da
     # ---- Região, PEP e históricos (comuns) ---------------------------------
     _set(caso, "regiao_risco", _simnao(kyc.get("regiaoRisco")))
     if caso.regiao_risco == "Sim":
-        _set(caso, "tipo_regiao_risco", _tipo_regiao(kyc.get("tipoRegiaoRisco")) or
-             caso.tipo_regiao_risco or TIPOS_REGIAO_RISCO_1[2])
+        _set(caso, "tipo_regiao_risco", _tipo_regiao(kyc.get("tipoRegiaoRisco")))
+        _set(caso, "tipo_regiao_risco_2", _txt(kyc.get("descricaoRegiaoRisco")))
     _set(caso, "pep", _simnao(kyc.get("pep")))
     if caso.pep == "Sim":
-        _set(caso, "tipo_pep", _tipo_pep(kyc.get("tipoPep")) or caso.tipo_pep or TIPOS_PEP[0])
+        _set(caso, "tipo_pep", _tipo_pep(kyc.get("tipoPep")))
         _set(caso, "descricao_pep", _txt(kyc.get("descricaoPep")))
     for attr, chave in (("historico_pld", "historicoPld"), ("historico_fraude", "historicoFraude"),
                         ("midia_negativa", "midiaNegativa")):
         _set(caso, attr, _simnao(kyc.get(chave)))
         _set(caso, attr + "_detalhe", _txt(kyc.get(chave + "Detalhe")))
-    _set(caso, "outras_info", _txt(kyc.get("outrasInformacoes")))
+    outras_info = kyc.get("outrasInformacoes")
+    if isinstance(outras_info, list):
+        outras_info = "\n".join(_txt(x) for x in outras_info if _txt(x))
+    _set(caso, "outras_info", _txt(outras_info))
 
     # ---- Bloco 3: movimentações ----------------------------------------------
     periodo = _txt(mov.get("periodo"))
@@ -782,6 +793,16 @@ def completar_obrigatorios(caso: Caso, hoje: Optional[date] = None) -> Caso:
             _txt_neutro(attr)
         _valor_neutro("renda_presumida")
 
+    if caso.regiao_risco == "Sim" and not (caso.tipo_regiao_risco or "").strip():
+        caso.tipo_regiao_risco = TIPOS_REGIAO_RISCO_1[2]
+    if caso.pep == "Sim" and not (caso.tipo_pep or "").strip():
+        caso.tipo_pep = TIPOS_PEP[0]
+    for socio in caso.socios:
+        if socio.regiao_risco == "Sim" and not (socio.tipo_regiao_risco or "").strip():
+            socio.tipo_regiao_risco = TIPOS_REGIAO_RISCO_1[2]
+        if socio.pep == "Sim" and not (socio.tipo_pep or "").strip():
+            socio.tipo_pep = TIPOS_PEP[0]
+
     if not (caso.mov_periodo or "").strip() or not parse_periodo(caso.mov_periodo):
         caso.mov_periodo = periodo_padrao(hoje)
     _valor_neutro("mov_total_credito")
@@ -796,6 +817,145 @@ def completar_obrigatorios(caso: Caso, hoje: Optional[date] = None) -> Caso:
 # ---------------------------------------------------------------------------
 # Orquestração
 # ---------------------------------------------------------------------------
+
+# Perguntas de KYC do titular: (rótulo, dica). Só entram as que ficaram sem resposta.
+_ROTULOS_KYC = {
+    "reg_soc_razao_social": ("Razão social (registro societário)", ""),
+    "reg_soc_data_abertura": ("Data de abertura (registro societário)", "DD/MM/AAAA"),
+    "reg_soc_situacao_cadastral": ("Situação cadastral (registro societário)", "Ex: Ativa"),
+    "reg_soc_ramo_atividade": ("Ramo de atividade (registro societário)", ""),
+    "cidade_estado": ("Cidade/Estado da região de risco", "Ex: Foz do Iguaçu/PR"),
+    "tipo_regiao_risco": ("Risco da região", ""),
+    "tipo_regiao_risco_2": ("Qual região de risco?", ""),
+    "tipo_pep": ("Tipo de PEP", ""),
+    "descricao_pep": ("Descrição do PEP e carência", "Cargo, órgão e carência"),
+    "midia_negativa_detalhe": ("Detalhes da mídia negativa", "Link (se houver), resumo, data e fonte"),
+    "historico_pld_detalhe": ("Detalhes do histórico de PLD", ""),
+    "historico_fraude_detalhe": ("Detalhes do histórico de fraude", ""),
+}
+OPCOES_KYC = {"tipo_regiao_risco": TIPOS_REGIAO_RISCO_1, "tipo_pep": TIPOS_PEP}
+
+# Perguntas de KYC das contrapartes (Bloco 3): campo do Caso -> (rótulo, dica).
+_SINAIS_CONTRAPARTE = {
+    "registro_societario": ("Registro societário", "Razão social, data de abertura, situação cadastral e ramo"),
+    "regiao_risco": ("Região de risco", "Cidade/Estado e risco da região"),
+    "pep": ("PEP", "Tipo de PEP, descrição e carência"),
+    "historico_pld": ("Histórico de PLD", "Detalhes"),
+    "historico_fraude": ("Histórico de fraude", "Detalhes"),
+    "midia_negativa": ("Mídia negativa", "Link (se houver), data e fonte"),
+}
+_LADOS = {"cred": ("crédito", "contrapartes_credito"), "deb": ("débito", "contrapartes_debito")}
+_SEP = "__"  # chaves de contraparte: cp__<cred|deb>__<índice>__<campo>_detalhe
+
+
+def _vazio(v: Any) -> bool:
+    return not (v or "").strip()
+
+
+def _chave_cp(lado: str, i: int, campo: str) -> str:
+    return _SEP.join(("cp", lado, str(i), campo + "_detalhe"))
+
+
+def _chave_so(i: int, attr: str) -> str:
+    return _SEP.join(("so", str(i), attr))
+
+
+def _ler_chave_so(chave: str) -> Tuple[int, str]:
+    _, i, attr = chave.split(_SEP)
+    return int(i), attr
+
+
+def _ler_chave_cp(chave: str) -> Tuple[str, int, str]:
+    _, lado, i, campo = chave.split(_SEP)
+    return lado, int(i), campo
+
+
+def faltas_kyc(caso: Caso) -> List[str]:
+    """Chaves das informações de KYC que o analista ainda precisa dar: toda vez que a IA marcou "Sim"
+    (registro societário, região de risco, PEP, mídia negativa, histórico de PLD ou de fraude), no
+    titular ou em uma contraparte, sem trazer os detalhes pedidos pelo formulário. Chaves do titular
+    são nomes de atributos do Caso; as das contrapartes seguem `_chave_cp`."""
+    f: List[str] = []
+    if not caso.eh_pj() and caso.registro_societario == "Sim":
+        f += [a for a in ("reg_soc_razao_social", "reg_soc_data_abertura", "reg_soc_situacao_cadastral",
+                          "reg_soc_ramo_atividade") if _vazio(getattr(caso, a))]
+    if caso.regiao_risco == "Sim":
+        if not caso.eh_pj() and _vazio(caso.cidade_estado):
+            f.append("cidade_estado")
+        if _vazio(caso.tipo_regiao_risco):
+            f.append("tipo_regiao_risco")
+        if caso.tipo_regiao_risco in ("", TIPOS_REGIAO_RISCO_1[2]) and _vazio(caso.tipo_regiao_risco_2):
+            f.append("tipo_regiao_risco_2")
+    if caso.pep == "Sim":
+        f += [a for a in ("tipo_pep", "descricao_pep") if _vazio(getattr(caso, a))]
+    for sim, det in (("midia_negativa", "midia_negativa_detalhe"), ("historico_pld", "historico_pld_detalhe"),
+                     ("historico_fraude", "historico_fraude_detalhe")):
+        if getattr(caso, sim) == "Sim" and _vazio(getattr(caso, det)):
+            f.append(det)
+    for lado, (_, attr_lista) in _LADOS.items():
+        for i, cp in enumerate(getattr(caso, attr_lista)):
+            for campo in _SINAIS_CONTRAPARTE:
+                if getattr(cp, campo) == "Sim" and _vazio(getattr(cp, campo + "_detalhe")):
+                    f.append(_chave_cp(lado, i, campo))
+    for i, so in enumerate(caso.socios):
+        if so.regiao_risco == "Sim" and _vazio(so.tipo_regiao_risco):
+            f.append(_chave_so(i, "tipo_regiao_risco"))
+        if so.pep == "Sim":
+            f += [_chave_so(i, a) for a in ("tipo_pep", "descricao_pep") if _vazio(getattr(so, a))]
+        for sim, det in (("midia_negativa", "midia_negativa_detalhe"), ("historico_pld", "historico_pld_detalhe"),
+                         ("historico_fraude", "historico_fraude_detalhe")):
+            if getattr(so, sim) == "Sim" and _vazio(getattr(so, det)):
+                f.append(_chave_so(i, det))
+    return f
+
+
+def rotulo_kyc(caso: Caso, chave: str) -> Tuple[str, str]:
+    """(rótulo, dica) da pergunta de KYC."""
+    if chave.startswith("cp" + _SEP):
+        _, _, campo = _ler_chave_cp(chave)
+        return _SINAIS_CONTRAPARTE[campo.removesuffix("_detalhe")]
+    if chave.startswith("so" + _SEP):
+        return _ROTULOS_KYC[_ler_chave_so(chave)[1]]
+    return _ROTULOS_KYC[chave]
+
+
+def opcoes_kyc(chave: str) -> Optional[List[str]]:
+    """Opções de seleção da pergunta (None quando a resposta é texto livre)."""
+    attr = _ler_chave_so(chave)[1] if chave.startswith("so" + _SEP) else chave
+    return OPCOES_KYC.get(attr)
+
+
+def grupo_kyc(caso: Caso, chave: str) -> str:
+    """Título do grupo da pergunta: o titular ou uma contraparte específica."""
+    if chave.startswith("so" + _SEP):
+        i, _ = _ler_chave_so(chave)
+        so = caso.socios[i]
+        return f"Sócio {i + 1}" + (f" — {so.nome}" if (so.nome or "").strip() else "")
+    if not chave.startswith("cp" + _SEP):
+        return "Cliente (KYC)"
+    lado, i, _ = _ler_chave_cp(chave)
+    nome_lado, attr_lista = _LADOS[lado]
+    cp = getattr(caso, attr_lista)[i]
+    return f"Contraparte de {nome_lado} {i + 1}" + (f" — {cp.nome}" if (cp.nome or "").strip() else "")
+
+
+def aplicar_respostas_kyc(caso: Caso, respostas: Dict[str, str]) -> None:
+    """Grava no Caso o que o analista respondeu às perguntas de KYC (ignora respostas vazias)."""
+    for chave, valor in respostas.items():
+        valor = (valor or "").strip()
+        if not valor:
+            continue
+        if chave.startswith("cp" + _SEP):
+            lado, i, campo = _ler_chave_cp(chave)
+            setattr(getattr(caso, _LADOS[lado][1])[i], campo, valor)
+        elif chave.startswith("so" + _SEP):
+            i, attr = _ler_chave_so(chave)
+            setattr(caso.socios[i], attr, valor)
+        elif chave in _ROTULOS_KYC:
+            setattr(caso, chave, valor)
+    if caso.tipo_regiao_risco != TIPOS_REGIAO_RISCO_1[2]:
+        caso.tipo_regiao_risco_2 = ""  # só existe quando o risco é "Outras Regiões de Risco"
+
 
 def aplicar_mudanca_respondida(caso: Caso, mudanca: Dict[str, Any], avisos: List[str]) -> None:
     """Monta a narrativa com os meses que o analista informou e a data de abertura/último reporte.
@@ -817,12 +977,13 @@ def aplicar_mudanca_respondida(caso: Caso, mudanca: Dict[str, Any], avisos: List
         caso.comp_data_abertura_ultimo_reporte = mudanca["data_conta"]
 
 
-def preencher_caso_via_ia(tipo_caso: str, fator_gerador: str, data_alerta: str, sentenca: str,
+def extrair_caso_via_ia(tipo_caso: str, fator_gerador: str, data_alerta: str, sentenca: str,
                           resumo: str, outras_movimentacoes: str = "", hoje: Optional[date] = None,
                           mudanca: Optional[Dict[str, Any]] = None,
                           **kw: Any) -> Tuple[Caso, List[str]]:
-    """Extrai, aplica, ajusta a coerência e completa os obrigatórios.
-    Devolve (caso, avisos). Os três campos do alerta são copiados como o analista digitou."""
+    """Extrai, aplica e ajusta a coerência, SEM completar os obrigatórios (o app ainda pode
+    perguntar o que faltou no KYC). Devolve (caso, avisos). Os três campos do alerta são
+    copiados como o analista digitou."""
     caso = Caso(numero_caso="tmp", tipo_caso=tipo_caso)
     caso.fator_gerador = fator_gerador
     caso.data_alerta = data_alerta
@@ -833,5 +994,11 @@ def preencher_caso_via_ia(tipo_caso: str, fator_gerador: str, data_alerta: str, 
     avisos = coerencia_extracao(caso, texto_total)
     if mudanca:
         aplicar_mudanca_respondida(caso, mudanca, avisos)
+    return caso, avisos
+
+
+def preencher_caso_via_ia(*args: Any, hoje: Optional[date] = None, **kw: Any) -> Tuple[Caso, List[str]]:
+    """Extrai e completa os obrigatórios numa só chamada. Devolve (caso, avisos)."""
+    caso, avisos = extrair_caso_via_ia(*args, hoje=hoje, **kw)
     completar_obrigatorios(caso, hoje)
     return caso, avisos

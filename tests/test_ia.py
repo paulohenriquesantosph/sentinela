@@ -376,6 +376,164 @@ def core_parse(v):
     return parse_valor_br(v)
 
 
+class TestPerguntasKYC(unittest.TestCase):
+    def _caso(self, **kw):
+        return Caso(numero_caso="t", tipo_caso="Pessoa Física (PF)", **kw)
+
+    def test_sem_sim_nao_ha_perguntas(self):
+        self.assertEqual(ia.faltas_kyc(self._caso()), [])
+
+    def test_sim_sem_detalhes_pergunta_cada_campo(self):
+        caso = self._caso(registro_societario="Sim", regiao_risco="Sim", pep="Sim", midia_negativa="Sim",
+                          historico_pld="Sim", historico_fraude="Sim")
+        self.assertEqual(ia.faltas_kyc(caso), [
+            "reg_soc_razao_social", "reg_soc_data_abertura", "reg_soc_situacao_cadastral",
+            "reg_soc_ramo_atividade", "cidade_estado", "tipo_regiao_risco", "tipo_regiao_risco_2",
+            "tipo_pep", "descricao_pep", "midia_negativa_detalhe", "historico_pld_detalhe",
+            "historico_fraude_detalhe"])
+
+    def test_so_pergunta_o_que_faltou(self):
+        caso = self._caso(registro_societario="Sim", reg_soc_razao_social="ACME LTDA",
+                          reg_soc_data_abertura="01/02/2020", reg_soc_situacao_cadastral="Ativa",
+                          reg_soc_ramo_atividade="Comércio", regiao_risco="Sim", cidade_estado="Foz do Iguaçu/PR",
+                          tipo_regiao_risco="Região de Fronteira", pep="Sim", tipo_pep="PEP Titular",
+                          descricao_pep="Vereador, carência até 2028")
+        self.assertEqual(ia.faltas_kyc(caso), [])
+
+    def test_outras_regioes_exige_nome_da_regiao(self):
+        caso = self._caso(regiao_risco="Sim", cidade_estado="X/PA", tipo_regiao_risco="Outras Regiões de Risco")
+        self.assertEqual(ia.faltas_kyc(caso), ["tipo_regiao_risco_2"])
+
+    def test_pj_nao_pergunta_registro_societario_nem_cidade(self):
+        caso = Caso(numero_caso="t", tipo_caso="Pessoa Jurídica (PJ)", registro_societario="Sim",
+                    regiao_risco="Sim", tipo_regiao_risco="Região de Fronteira")
+        self.assertEqual(ia.faltas_kyc(caso), [])
+
+    def test_respostas_resolvem_as_faltas(self):
+        caso = self._caso(pep="Sim", regiao_risco="Sim")
+        ia.aplicar_respostas_kyc(caso, {"tipo_pep": "PEP Relacionado", "descricao_pep": "Esposa de prefeito",
+                                        "cidade_estado": "Tabatinga/AM", "tipo_regiao_risco": "Região de Fronteira",
+                                        "tipo_regiao_risco_2": "lixo"})
+        self.assertEqual(ia.faltas_kyc(caso), [])
+        self.assertEqual(caso.tipo_regiao_risco_2, "")  # só vale para "Outras Regiões de Risco"
+
+    def test_ia_nao_preenche_tipos_por_padrao_mas_o_fechamento_sim(self):
+        d = {"kyc": {"regiaoRisco": "Sim", "pep": "Sim", "descricaoPep": "Deputado"}}
+        caso = ia.aplicar_dados_extraidos(self._caso(), d, HOJE)
+        self.assertEqual((caso.tipo_regiao_risco, caso.tipo_pep), ("", ""))
+        self.assertIn("tipo_pep", ia.faltas_kyc(caso))
+        ia.completar_obrigatorios(caso, HOJE)
+        self.assertEqual((caso.tipo_regiao_risco, caso.tipo_pep), ("Outras Regiões de Risco", "PEP Titular"))
+
+    def test_descricao_da_regiao_e_outras_informacoes_em_lista(self):
+        d = {"kyc": {"regiaoRisco": "Sim", "tipoRegiaoRisco": "Outras Regiões de Risco",
+                     "descricaoRegiaoRisco": "Garimpo ilegal no Tapajós",
+                     "outrasInformacoes": ["Compartilha dispositivo com 3 contas", "Exchange: Binance"]}}
+        caso = ia.aplicar_dados_extraidos(self._caso(), d, HOJE)
+        self.assertEqual(caso.tipo_regiao_risco_2, "Garimpo ilegal no Tapajós")
+        self.assertEqual(caso.outras_info, "Compartilha dispositivo com 3 contas\nExchange: Binance")
+
+    def test_regras_no_prompt(self):
+        self.assertIn("UMA INFORMAÇÃO POR LINHA", ia.SYSTEM_PROMPT_PF)
+        self.assertIn("descricaoRegiaoRisco", ia.SYSTEM_PROMPT_PJ)
+
+
+class TestPerguntasKYCContrapartes(unittest.TestCase):
+    def _caso(self):
+        d = {"movimentacoes": {"periodo": "01/04/2026 até 30/06/2026", "totalCredito": "R$300.000,00",
+                               "totalDebito": "R$100.000,00", "totalContrapartesCredito": "10",
+                               "contrapartesCredito": [
+                                   {"tipo": "Pessoa Física", "nome": "Ana", "porcentagem": "30%", "pep": "Sim",
+                                    "pepDetalhe": "Vereadora, carência até 2028"},
+                                   {"tipo": "Pessoa Física", "nome": "", "porcentagem": "20%", "pep": "Sim",
+                                    "midiaNegativa": "Sim"},
+                                   {"tipo": "Pessoa Física", "nome": "Beto", "porcentagem": "10%",
+                                    "registroSocietario": "Sim", "regiaoRisco": "Sim"}],
+                               "contrapartesDebito": [
+                                   {"tipo": "Pessoa Física", "nome": "Caio", "porcentagem": "40%",
+                                    "historicoPld": "Sim", "historicoFraude": "Sim"}]}}
+        return ia.aplicar_dados_extraidos(Caso(numero_caso="t", tipo_caso="Pessoa Física (PF)"), d, HOJE)
+
+    def test_pergunta_por_contraparte_so_o_que_falta(self):
+        caso = self._caso()
+        self.assertEqual(ia.faltas_kyc(caso), [
+            "cp__cred__1__pep_detalhe", "cp__cred__1__midia_negativa_detalhe",
+            "cp__cred__2__registro_societario_detalhe", "cp__cred__2__regiao_risco_detalhe",
+            "cp__deb__0__historico_pld_detalhe", "cp__deb__0__historico_fraude_detalhe"])
+
+    def test_grupos_e_rotulos(self):
+        caso = self._caso()
+        self.assertEqual(ia.grupo_kyc(caso, "cp__cred__1__pep_detalhe"), "Contraparte de crédito 2")
+        self.assertEqual(ia.grupo_kyc(caso, "cp__cred__2__regiao_risco_detalhe"), "Contraparte de crédito 3 — Beto")
+        self.assertEqual(ia.grupo_kyc(caso, "cp__deb__0__historico_pld_detalhe"), "Contraparte de débito 1 — Caio")
+        self.assertEqual(ia.rotulo_kyc(caso, "cp__cred__1__midia_negativa_detalhe")[0], "Mídia negativa")
+        self.assertEqual(ia.grupo_kyc(caso, "cidade_estado"), "Cliente (KYC)")
+
+    def test_respostas_vao_para_a_contraparte_certa(self):
+        caso = self._caso()
+        ia.aplicar_respostas_kyc(caso, {"cp__cred__1__pep_detalhe": "Prefeito, sem carência",
+                                        "cp__deb__0__historico_pld_detalhe": "COAF 2025",
+                                        "cp__cred__1__midia_negativa_detalhe": ""})
+        self.assertEqual(caso.contrapartes_credito[1].pep_detalhe, "Prefeito, sem carência")
+        self.assertEqual(caso.contrapartes_debito[0].historico_pld_detalhe, "COAF 2025")
+        self.assertEqual(caso.contrapartes_credito[0].pep_detalhe, "Vereadora, carência até 2028")
+        self.assertEqual(len(ia.faltas_kyc(caso)), 4)  # a resposta vazia segue pendente
+
+    def test_regra_de_varias_contrapartes_no_prompt_e_schema(self):
+        self.assertIn("MAIS DE UMA contraparte", ia.SYSTEM_PROMPT_PF)
+        self.assertIn("CRIE uma entrada por contraparte", ia.SYSTEM_PROMPT_PJ)
+        self.assertIn('"pepDetalhe"', ia.SYSTEM_PROMPT_PF)
+
+
+class TestPerguntasKYCSocios(unittest.TestCase):
+    def _caso(self):
+        d = {"kyc": {"nomeEmpresa": "Padaria Estrela Ltda", "presencaOnline": "Sim", "fachadaEmpresa": "Não",
+                     "presencaOnlineDetalhe": "ignorado",
+                     "socios": [
+                         {"nome": "Maria Souza", "pep": "Sim", "tipoPep": "PEP Titular",
+                          "descricaoPep": "Vereadora, carência até 2028"},
+                         {"nome": "", "pep": "Sim", "midiaNegativa": "Sim"},
+                         {"nome": "Beto", "regiaoRisco": "Sim", "historicoPld": "Sim"},
+                         {"nome": "", "idade": "50"}]}}
+        return ia.aplicar_dados_extraidos(Caso(numero_caso="t", tipo_caso="Pessoa Jurídica (PJ)"), d, HOJE)
+
+    def test_socio_sem_nome_so_entra_com_sinal(self):
+        caso = self._caso()
+        self.assertEqual([s.nome for s in caso.socios], ["Maria Souza", "", "Beto"])
+
+    def test_presenca_e_fachada_so_sim_ou_nao(self):
+        caso = self._caso()
+        self.assertEqual((caso.presenca_online, caso.fachada_empresa), ("Sim", "Não"))
+        self.assertFalse(hasattr(caso, "presenca_online_detalhe"))
+        self.assertFalse(hasattr(caso, "fachada_empresa_detalhe"))
+        self.assertNotIn("Detalhe", ia.SCHEMA_EXTRACAO_PJ.split('"socios"')[0].split('"presencaOnline"')[1][:80])
+
+    def test_perguntas_por_socio(self):
+        caso = self._caso()
+        self.assertEqual(ia.faltas_kyc(caso), [
+            "so__1__tipo_pep", "so__1__descricao_pep", "so__1__midia_negativa_detalhe",
+            "so__2__tipo_regiao_risco", "so__2__historico_pld_detalhe"])
+        self.assertEqual(ia.grupo_kyc(caso, "so__1__tipo_pep"), "Sócio 2")
+        self.assertEqual(ia.grupo_kyc(caso, "so__2__tipo_regiao_risco"), "Sócio 3 — Beto")
+        self.assertEqual(ia.rotulo_kyc(caso, "so__1__descricao_pep")[0], "Descrição do PEP e carência")
+        self.assertEqual(ia.opcoes_kyc("so__2__tipo_regiao_risco"), ia.TIPOS_REGIAO_RISCO_1)
+        self.assertIsNone(ia.opcoes_kyc("so__1__descricao_pep"))
+
+    def test_respostas_vao_para_o_socio_certo_e_defaults_no_fechamento(self):
+        caso = self._caso()
+        ia.aplicar_respostas_kyc(caso, {"so__1__tipo_pep": "PEP Relacionado", "so__1__descricao_pep": "Filho de prefeito",
+                                        "so__2__historico_pld_detalhe": "COAF 2025"})
+        self.assertEqual((caso.socios[1].tipo_pep, caso.socios[1].descricao_pep), ("PEP Relacionado", "Filho de prefeito"))
+        self.assertEqual(caso.socios[2].historico_pld_detalhe, "COAF 2025")
+        self.assertEqual(caso.socios[0].descricao_pep, "Vereadora, carência até 2028")
+        ia.completar_obrigatorios(caso, HOJE)
+        self.assertEqual(caso.socios[2].tipo_regiao_risco, "Outras Regiões de Risco")
+
+    def test_regras_pj_no_prompt(self):
+        self.assertIn("2 sócios são PEP", ia.SYSTEM_PROMPT_PJ)
+        self.assertIn("só \"Sim\" ou \"Não\"", ia.SYSTEM_PROMPT_PJ)
+
+
 class TestAplicar(unittest.TestCase):
     def test_narrativa_mudanca_de_comportamento(self):
         caso = ia.aplicar_dados_extraidos(Caso(numero_caso="t", tipo_caso="Pessoa Física (PF)"), dados_joao(), HOJE)
@@ -454,7 +612,11 @@ class TestAplicar(unittest.TestCase):
         self.assertEqual(caso.nome_cliente, "")
         self.assertEqual(caso.idade, "")
         self.assertEqual(len(caso.socios), 1)
-        self.assertEqual((caso.socios[0].pep, caso.socios[0].tipo_pep), ("Sim", "PEP Titular"))
+        # o tipo de PEP não é presumido: o app pergunta; o padrão só entra no fechamento
+        self.assertEqual((caso.socios[0].pep, caso.socios[0].tipo_pep), ("Sim", ""))
+        self.assertIn("so__0__tipo_pep", ia.faltas_kyc(caso))
+        ia.completar_obrigatorios(caso, HOJE)
+        self.assertEqual(caso.socios[0].tipo_pep, "PEP Titular")
         self.assertEqual(caso.genero, "")
 
     def test_under18_responsavel_legal(self):

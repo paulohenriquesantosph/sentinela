@@ -255,10 +255,6 @@ def _faixa_aba(ctx: _Ctx, titulo: str) -> Table:
     return t
 
 
-def _cor_risco(risco: str):
-    return {"ALTO": VERMELHO, "MÉDIO": AMBAR}.get(risco, VERDE)
-
-
 def _cor_selo(estilo: str):
     return {"verde": VERDE, "ambar": AMBAR, "vermelho": VERMELHO,
             "neutro": NEUTRO_COR}.get(estilo, ACCENT)
@@ -272,15 +268,6 @@ def _cor_nota(nota: float):
 # Cabeçalho do dossiê
 # ---------------------------------------------------------------------------
 def _cabecalho(ctx: _Ctx, caso) -> List[Any]:
-    risco = caso.risco_geral()
-    cor = _cor_risco(risco)
-    chip_estilo = ParagraphStyle("chip", fontName=MONO_B, fontSize=7.5, leading=10,
-                                 textColor=colors.white, alignment=1)
-    chip = Table([[Paragraph(f"RISCO {_t(risco)}", chip_estilo)]], colWidths=[3.1 * cm])
-    chip.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, -1), cor), ("ROUNDEDCORNERS", [8, 8, 8, 8]),
-        ("TOPPADDING", (0, 0), (-1, -1), 3), ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-    ]))
     esquerda = [
         Paragraph("SENTINELA PLD &mdash; DOSSIÊ", ctx.st["eyebrow"]),
         Spacer(1, 3),
@@ -288,14 +275,13 @@ def _cabecalho(ctx: _Ctx, caso) -> List[Any]:
         Paragraph(_t(caso.nome_display(), "Sem nome"), ctx.st["nome"]),
         Paragraph(_t(caso.tipo_caso), ctx.st["texto_peq"]),
     ]
-    t = Table([[esquerda, chip]], colWidths=[ctx.largura - 3.4 * cm, 3.1 * cm])
+    t = Table([[esquerda]], colWidths=[ctx.largura])
     t.setStyle(TableStyle([
-        ("VALIGN", (0, 0), (0, 0), "TOP"), ("VALIGN", (1, 0), (1, 0), "TOP"),
+        ("VALIGN", (0, 0), (0, 0), "TOP"),
         ("BOX", (0, 0), (-1, -1), 2.2, PURPLE_DEEP), ("ROUNDEDCORNERS", [9, 9, 9, 9]),
         ("BACKGROUND", (0, 0), (-1, -1), PAPER_ALT),
         ("LEFTPADDING", (0, 0), (-1, -1), 12), ("RIGHTPADDING", (0, 0), (-1, -1), 8),
         ("TOPPADDING", (0, 0), (-1, -1), 9), ("BOTTOMPADDING", (0, 0), (-1, -1), 9),
-        ("ALIGN", (1, 0), (1, 0), "RIGHT"),
     ]))
     return [t, Spacer(1, 8)]
 
@@ -344,8 +330,8 @@ def _secao_kyc(ctx: _Ctx, caso) -> List[Any]:
             ("Nome da empresa", caso.nome_empresa), ("Data de abertura", caso.data_abertura),
             ("Ramo de atividade", caso.ramo_atividade), ("Porte", caso.porte),
             ("Faturamento presumido", caso.faturamento_presumido), ("Endereço", caso.endereco),
-            ("Presença online", _com_detalhe(caso.presenca_online, caso.presenca_online_detalhe)),
-            ("Fachada da empresa", _com_detalhe(caso.fachada_empresa, caso.fachada_empresa_detalhe)),
+            ("Presença online", caso.presenca_online or "Não"),
+            ("Fachada da empresa", caso.fachada_empresa or "Não"),
         ])
     else:
         out += _subtitulo(ctx, "Informações Básicas do Cliente")
@@ -380,10 +366,8 @@ def _secao_kyc(ctx: _Ctx, caso) -> List[Any]:
     if caso.eh_pj() and caso.socios:
         out += _subtitulo(ctx, "Informações Sobre o Sócio")
         for s in caso.socios:
-            nivel = s.nivel_risco()
             itens = [("Nome", s.nome), ("Idade", s.idade), ("Endereço", s.endereco),
-                     ("Renda presumida", s.renda_presumida), ("Patrimônio", s.patrimonio),
-                     ("Risco do sócio", nivel)]
+                     ("Renda presumida", s.renda_presumida), ("Patrimônio", s.patrimonio)]
             if s.regiao_risco == "Sim":
                 itens.append(("Região de risco", _com_detalhe("Sim", s.tipo_regiao_risco)))
             if s.pep == "Sim":
@@ -394,7 +378,7 @@ def _secao_kyc(ctx: _Ctx, caso) -> List[Any]:
                 itens.append(("Histórico de fraude", _com_detalhe("Sim", s.historico_fraude_detalhe)))
             if s.midia_negativa == "Sim":
                 itens.append(("Mídia negativa", _com_detalhe("Sim", s.midia_negativa_detalhe)))
-            out += _pilulas(ctx, itens, {"Risco do sócio": _cor_risco(nivel)})
+            out += _pilulas(ctx, itens)
     out += _subtitulo(ctx, "Outras Informações Relevantes")
     out.append(_texto(ctx, caso.outras_info))
     return out
@@ -511,7 +495,6 @@ def _secao_thundera(ctx: _Ctx, caso, grafico_png: Optional[bytes]) -> List[Any]:
         out += _pilulas(ctx, [("Mensagens Pix", caso.comp_pix or "Não")])
 
     tl: List[Any] = _subtitulo(ctx, "Timeline de Transferências")
-    tl += _pilulas(ctx, [("Timeline", caso.comp_evasao or "—")])
     png = grafico_png
     if png is None and caso.comp_evasao:
         try:
@@ -530,28 +513,15 @@ def _secao_thundera(ctx: _Ctx, caso, grafico_png: Optional[bytes]) -> List[Any]:
         if img:
             tl += [img, Spacer(1, 4)]
     out.append(KeepTogether(tl))  # título, totais e gráfico não se separam entre páginas
-    out += _subtitulo(ctx, "Mudança de Comportamento")
     if caso.comp_mudanca_comportamento.strip():
+        # só os meses e valores movimentados: o dossiê não afirma se houve mudança de comportamento
+        out += _subtitulo(ctx, "Valores Movimentados por Mês")
         for linha in caso.comp_mudanca_comportamento.splitlines():
             if linha.strip():
                 out.append(Paragraph(_t(linha), ctx.st["texto"]))
-    else:
-        out.append(_texto(ctx, "", "Sem mudança de comportamento informada.", "texto_peq"))
     out.append(Spacer(1, 4))
     out += _pilulas(ctx, [("Data de abertura da conta/data do último reporte",
                            caso.comp_data_abertura_ultimo_reporte)])
-
-    fatores = caso.fatores_risco()
-    risco = caso.risco_geral()
-    out += _subtitulo(ctx, "Risco Geral do Caso")
-    out.append(Paragraph(f"<b>Risco geral: <font color=\"{_hex(_cor_risco(risco))}\">{_t(risco)}</font></b>",
-                         ctx.st["texto"]))
-    if fatores:
-        for nivel, desc in fatores:
-            out.append(Paragraph(f"&bull; {_t(desc)} <font color=\"{_hex(_cor_risco(nivel))}\">"
-                                 f"({_t(nivel)})</font>", ctx.st["texto_peq"]))
-    else:
-        out.append(_texto(ctx, "", "Nenhum fator de risco identificado.", "texto_peq"))
     return out
 
 

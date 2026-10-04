@@ -67,6 +67,7 @@ DEFAULTS: Dict[str, Any] = {
     "banco_termo": "",
     "ia_avisos": [],
     "ia_erro": "",
+    "ia_pendente": None,
     "erros_form": [],
     "timeline": None,
     "snapshot": None,
@@ -97,6 +98,7 @@ def limpar_formulario() -> None:
     ss.snapshot = None
     ss.gerado_numero = None
     ss.ia_avisos = []
+    ss.ia_pendente = None
     ss.erros_form = []
 
 
@@ -193,8 +195,8 @@ CAMPOS: List[tuple] = [
     ("f_outras_info", "outras_info"),
     ("f_empresa", "nome_empresa"), ("f_emp_data", "data_abertura"), ("f_emp_ramo", "ramo_atividade"),
     ("f_emp_porte", "porte"), ("f_emp_fat", "faturamento_presumido"), ("f_emp_end", "endereco"),
-    ("f_pres_online", "presenca_online"), ("f_pres_online_d", "presenca_online_detalhe"),
-    ("f_fachada", "fachada_empresa"), ("f_fachada_d", "fachada_empresa_detalhe"),
+    ("f_pres_online", "presenca_online"),
+    ("f_fachada", "fachada_empresa"),
     ("f_rep_nome", "rep_nome"), ("f_rep_renda", "rep_renda_presumida"), ("f_rep_regprof", "rep_reg_prof"),
     ("f_rep_regsoc", "rep_reg_soc"), ("f_rep_hpld", "rep_hist_pld"), ("f_rep_hfraude", "rep_hist_fraude"),
     ("f_periodo", "mov_periodo"), ("f_tot_cred", "mov_total_credito"),
@@ -386,7 +388,36 @@ def tela_modo_preenchimento() -> None:
 # ---------------------------------------------------------------------------
 # PREENCHIMENTO AUTOMÁTICO VIA IA
 # ---------------------------------------------------------------------------
+def _respostas_kyc(caso: Caso) -> Dict[str, str]:
+    return {k: _txt(f"ia_kyc_{k}") for k in ia.faltas_kyc(caso)}
+
+
+def _concluir_ia(caso: Caso, avisos: List[str]) -> None:
+    ia.completar_obrigatorios(caso)
+    ss.ia_erro = ""
+    ss.ia_pendente = None
+    carregar_caso_no_formulario(caso)
+    ss.ia_avisos = avisos
+    ir_para("formulario")
+
+
+def _refazer_ia() -> None:
+    ss.ia_pendente = None
+    ss.ia_erro = ""
+
+
 def _preencher_com_ia() -> None:
+    pend = ss.get("ia_pendente")
+    if pend:  # 2ª etapa: o analista respondeu as perguntas de KYC
+        caso = pend["caso"]
+        ia.aplicar_respostas_kyc(caso, _respostas_kyc(caso))
+        faltas = ia.faltas_kyc(caso)
+        if faltas:
+            ss.ia_erro = "Preencha: " + "; ".join(
+                f"{ia.grupo_kyc(caso, k)}: {ia.rotulo_kyc(caso, k)[0]}" for k in faltas) + "."
+            return
+        _concluir_ia(caso, pend["avisos"])
+        return
     erros = []
     if not _txt("ia_fator"):
         erros.append("Nome do alerta")
@@ -405,7 +436,7 @@ def _preencher_com_ia() -> None:
         ss.ia_erro = "Preencha: " + "; ".join(erros) + "."
         return
     try:
-        caso, avisos = ia.preencher_caso_via_ia(
+        caso, avisos = ia.extrair_caso_via_ia(
             tipo_caso=ss.tipo_caso_novo or TIPOS_CASO[0],
             fator_gerador=_txt("ia_fator"), data_alerta=_txt("ia_data"), sentenca=_txt("ia_sentenca"),
             resumo=_txt("ia_resumo"), outras_movimentacoes=_txt("ia_outras"), mudanca=mudanca)
@@ -415,38 +446,73 @@ def _preencher_com_ia() -> None:
     except Exception as e:  # noqa: BLE001 - erro inesperado não pode derrubar a tela
         ss.ia_erro = f"Erro inesperado ao preencher com IA: {e}"
         return
-    ss.ia_erro = ""
-    carregar_caso_no_formulario(caso)
-    ss.ia_avisos = avisos
-    ir_para("formulario")
+    if ia.faltas_kyc(caso):
+        ss.ia_erro = ""
+        ss.ia_pendente = {"caso": caso, "avisos": avisos}
+        return
+    _concluir_ia(caso, avisos)
+
+
+def _painel_kyc_pendente(caso: Caso) -> None:
+    """Perguntas sobre os "Sim" do KYC (cliente e contrapartes) que vieram sem detalhes."""
+    estilo.dica("<b>Faltam informações do KYC.</b> O resumo indicou \"Sim\" em alguns itens sem trazer os "
+                "detalhes. Informe abaixo; eles vão direto para os campos do formulário (Bloco 2 e contrapartes "
+                "do Bloco 3).")
+    tipo_escolhido = _txt("ia_kyc_tipo_regiao_risco") or caso.tipo_regiao_risco
+    grupo_atual = None
+    for chave in ia.faltas_kyc(caso):
+        if chave == "tipo_regiao_risco_2" and tipo_escolhido != TIPOS_REGIAO_RISCO_1[2]:
+            continue
+        grupo = ia.grupo_kyc(caso, chave)
+        if grupo != grupo_atual:
+            estilo.subtitulo(grupo)
+            grupo_atual = grupo
+        rotulo, dica = ia.rotulo_kyc(caso, chave)
+        opcoes = ia.opcoes_kyc(chave)
+        if opcoes:
+            escolha(rotulo, f"ia_kyc_{chave}", [""] + opcoes, padrao="", obrig=True)
+        else:
+            campo(rotulo, f"ia_kyc_{chave}", obrig=True, ph=dica or None)
 
 
 def tela_preenchimento_ia() -> None:
+    pend = ss.get("ia_pendente")
+    bloq = bool(pend)
     estilo.titulo_cartao("Preenchimento com instruções", "DESCREVA O CASO", pequeno=True)
-    campo("Nome do alerta", "ia_fator", obrig=True)
-    campo("Data do alerta", "ia_data", padrao=formatar_data_br(date.today()), obrig=True)
-    campo("Sentença", "ia_sentenca", obrig=True, area=True, altura=80)
+    campo("Nome do alerta", "ia_fator", obrig=True, desabilitado=bloq)
+    campo("Data do alerta", "ia_data", padrao=formatar_data_br(date.today()), obrig=True, desabilitado=bloq)
+    campo("Sentença", "ia_sentenca", obrig=True, area=True, altura=80, desabilitado=bloq)
+    if ss.tipo_caso_novo == TIPO_PJ:
+        estilo.dica("<b>Caso PJ — dados da empresa.</b> Inclua no resumo: <b>Nome da Empresa, Data de Abertura, "
+                    "Ramo de Atividade, Porte, Faturamento Presumido, Endereço, Fachada</b> (Sim ou Não) e "
+                    "<b>Presença Online</b> (Sim ou Não). Fachada e Presença Online vão para o formulário "
+                    "apenas como Sim ou Não.")
     estilo.dica("Cole ou digite um resumo com as informações do caso (cliente, movimentação, contrapartes, "
                 "comportamento) para o Sentinela tentar preencher os campos automaticamente.")
-    campo("Resumo do caso", "ia_resumo", area=True, altura=170, oculto_rotulo=True)
+    campo("Resumo do caso", "ia_resumo", area=True, altura=170, oculto_rotulo=True, desabilitado=bloq)
     estilo.dica("Outras Movimentações (opcional) — descreva aqui apenas movimentações que <b>não</b> sejam "
                 "transferências bancárias comuns (ex: saques, boletos, gastos no cartão, empréstimos, "
                 "criptomoedas, investimentos). Isso alimenta o campo \"Outras Movimentações\" do Resumo "
                 "de Movimentações.")
-    campo("Outras movimentações", "ia_outras", area=True, altura=110, oculto_rotulo=True)
+    campo("Outras movimentações", "ia_outras", area=True, altura=110, oculto_rotulo=True, desabilitado=bloq)
     if ia.menciona_mudanca_comportamento(_txt("ia_resumo")):
         estilo.dica("<b>Você citou mudança de comportamento.</b> As movimentações serão descritas em 6 meses: o "
                     "último é o mês do alerta (mês da mudança) e os outros 5 são os meses anteriores. Se não "
                     "informar o valor, o Sentinela cria um valor elevado para o mês da mudança, sempre abaixo do "
                     "total movimentado no período do alerta.")
         v1, v2 = st.columns(2)
-        campo("Valor do mês da mudança (opcional)", "ia_mc_valor", ph="Ex: R$160.000,00", container=v1)
-        campo("Abertura da conta e/ou último reporte", "ia_mc_conta", obrig=True, ph="DD/MM/AAAA", container=v2)
+        campo("Valor do mês da mudança (opcional)", "ia_mc_valor", ph="Ex: R$160.000,00", container=v1, desabilitado=bloq)
+        campo("Abertura da conta e/ou último reporte", "ia_mc_conta", obrig=True, ph="DD/MM/AAAA", container=v2, desabilitado=bloq)
+    if pend:
+        _painel_kyc_pendente(pend["caso"])
     if ss.ia_erro:
         estilo.msg_erro(ss.ia_erro)
     with st.spinner("Chamando a IA para preencher o formulário…"):
-        st.button("Preencher automaticamente", key="ia_preencher", type="primary", on_click=_preencher_com_ia)
-    botao_link("← Voltar", key="ia_voltar", on_click=ir_para, args=("modo_preenchimento",))
+        st.button("Continuar" if pend else "Preencher automaticamente", key="ia_preencher", type="primary",
+                  on_click=_preencher_com_ia)
+    if pend:
+        botao_link("Refazer com outro resumo", key="ia_refazer", on_click=_refazer_ia)
+    botao_link("← Voltar", key="ia_voltar", on_click=lambda: (_refazer_ia(), ir_para("modo_preenchimento")))
 
 
 # ---------------------------------------------------------------------------
@@ -596,13 +662,7 @@ def tela_formulario() -> None:
             campo("Faturamento presumido", "f_emp_fat", obrig=True, container=c5)
             campo("Endereço", "f_emp_end", obrig=True, container=c6)
             selecao_estreita("Presença online", "f_pres_online", SIM_NAO)
-            if ss.get("f_pres_online") == "Sim":
-                campo("Detalhes da presença online", "f_pres_online_d", obrig=True,
-                      ph="Insira o link ou informação sobre a presença online.")
             selecao_estreita("Fachada da empresa", "f_fachada", SIM_NAO)
-            if ss.get("f_fachada") == "Sim":
-                campo("Detalhes da fachada da empresa", "f_fachada_d", obrig=True,
-                      ph="Insira o link ou informação sobre a fachada e data.")
         else:
             if tipo_caso == TIPO_UNDER18:
                 _bloco_resp_legal()
@@ -1162,7 +1222,7 @@ def tela_banco() -> None:
         with estilo.variante("linhas"):
             for item in resultados:
                 rotulo = (f"{item['numero_caso']}  —  {item.get('nome_cliente', '')}   ·   "
-                          f"{str(item.get('tipo_caso', '')).upper()}   ·   RISCO {item.get('risco', '—')}   "
+                          f"{str(item.get('tipo_caso', '')).upper()}   "
                           f"·   {item.get('diligencia', 'Pendente')}   ↗")
                 st.button(rotulo, key=f"abrir_{item['numero_caso']}", type="secondary",
                           on_click=ver_dossie, args=(item["numero_caso"], "banco"))

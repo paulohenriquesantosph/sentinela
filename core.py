@@ -215,20 +215,6 @@ class ContraparteMovimentacao:
     midia_negativa: str = "Não"
     midia_negativa_detalhe: str = ""
 
-    def flags_risco(self) -> List[str]:
-        out = []
-        if self.pep == "Sim":
-            out.append("PEP")
-        if self.regiao_risco == "Sim":
-            out.append("região de risco")
-        if self.historico_pld == "Sim":
-            out.append("histórico de PLD")
-        if self.historico_fraude == "Sim":
-            out.append("histórico de fraude")
-        if self.midia_negativa == "Sim":
-            out.append("mídia negativa")
-        return out
-
 
 @dataclass
 class OutraMovimentacao:
@@ -268,16 +254,6 @@ class Socio:
     historico_fraude_detalhe: str = ""
     midia_negativa: str = "Não"
     midia_negativa_detalhe: str = ""
-
-    def nivel_risco(self) -> str:
-        if self.pep == "Sim" or self.historico_pld == "Sim" or self.historico_fraude == "Sim":
-            return "ALTO"
-        if self.regiao_risco == "Sim" or self.midia_negativa == "Sim":
-            return "MÉDIO"
-        return "BAIXO"
-
-
-_NIVEIS = {"BAIXO": 0, "MÉDIO": 1, "ALTO": 2}
 
 
 @dataclass
@@ -332,9 +308,7 @@ class Caso:
     faturamento_presumido: str = ""
     endereco: str = ""
     presenca_online: str = "Não"
-    presenca_online_detalhe: str = ""
     fachada_empresa: str = "Não"
-    fachada_empresa_detalhe: str = ""
     socios: List[Socio] = field(default_factory=list)
 
     # KYC - Under 18 (responsável legal)
@@ -404,12 +378,6 @@ class Caso:
     def resolucao_travada(self) -> bool:
         return bool(self.resolucao_bloqueada_em)
 
-    def fatores_risco(self) -> List[Tuple[str, str]]:
-        return fatores_risco_caso(self)
-
-    def risco_geral(self) -> str:
-        return risco_geral_caso(self)
-
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
 
@@ -434,87 +402,6 @@ class Caso:
 def _construir(classe, dados: Dict[str, Any]):
     validos = {f.name for f in fields(classe)}
     return classe(**{k: v for k, v in dados.items() if k in validos})
-
-
-# ---------------------------------------------------------------------------
-# Risco geral
-# ---------------------------------------------------------------------------
-
-def _meses_do_periodo(periodo: str) -> int:
-    pr = parse_periodo(periodo)
-    if not pr:
-        return 2
-    ini, fim = pr
-    return max(1, round(((fim - ini).days + 1) / 30.0))
-
-
-def fatores_risco_caso(caso: "Caso") -> List[Tuple[str, str]]:
-    """Lista de (nível, descrição) dos fatores que pesam no risco geral.
-
-    Considera o cadastro do cliente, os sócios (PJ), as contrapartes, os
-    comportamentos do Thundera e a compatibilidade da movimentação com a renda
-    (ou faturamento) presumida."""
-    f: List[Tuple[str, str]] = []
-
-    if caso.pep == "Sim":
-        f.append(("ALTO", "Cliente PEP" + (f" ({caso.tipo_pep})" if caso.tipo_pep else "")))
-    if caso.historico_pld == "Sim":
-        f.append(("ALTO", "Histórico de PLD do cliente"))
-    if caso.historico_fraude == "Sim":
-        f.append(("ALTO", "Histórico de fraude do cliente"))
-    if caso.regiao_risco == "Sim":
-        f.append(("MÉDIO", "Cliente em região de risco"))
-    if caso.midia_negativa == "Sim":
-        f.append(("MÉDIO", "Mídia negativa do cliente"))
-    if caso.tipo_caso == TIPO_UNDER18:
-        if (caso.rep_hist_pld or "").strip().lower() not in ("", "não", "nao", "n/a", NEUTRO.lower()):
-            f.append(("ALTO", "Histórico de PLD do responsável legal"))
-        if (caso.rep_hist_fraude or "").strip().lower() not in ("", "não", "nao", "n/a", NEUTRO.lower()):
-            f.append(("ALTO", "Histórico de fraude do responsável legal"))
-
-    for s in caso.socios:
-        nivel = s.nivel_risco()
-        if nivel != "BAIXO":
-            f.append((nivel, f"Sócio {s.nome or '(sem nome)'} com sinais de risco"))
-
-    for rotulo, lista in (("crédito", caso.contrapartes_credito), ("débito", caso.contrapartes_debito)):
-        for c in lista:
-            flags = c.flags_risco()
-            if flags:
-                nivel = "ALTO" if ({"PEP", "histórico de PLD", "histórico de fraude"} & set(flags)) else "MÉDIO"
-                f.append((nivel, f"Contraparte de {rotulo} {c.nome or ''} ({', '.join(flags)})".replace("  ", " ")))
-
-    if caso.comp_evasao == "Rápida Evasão":
-        f.append(("MÉDIO", "Rápida evasão dos recursos"))
-    if caso.comp_arredondamento == "Sim":
-        f.append(("MÉDIO", "Transações em valores redondos (arredondamento)"))
-    if caso.comp_mudanca_comportamento.strip():
-        f.append(("MÉDIO", "Mudança de comportamento"))
-    if any(m.tipo == "Saques" and m.info.strip() for m in caso.outras_movimentacoes):
-        f.append(("MÉDIO", "Saques em espécie"))
-
-    base = caso.faturamento_presumido if caso.eh_pj() else caso.renda_presumida
-    renda = parse_valor_br(base)
-    mov = max(parse_valor_br(caso.mov_total_credito), parse_valor_br(caso.mov_total_debito))
-    if renda > 0 and mov > 0:
-        razao = mov / (renda * _meses_do_periodo(caso.mov_periodo))
-        base_txt = "do faturamento presumido" if caso.eh_pj() else "da renda presumida"
-        if razao >= 10:
-            f.append(("ALTO", f"Movimentação {razao:.0f}x acima {base_txt} no período"))
-        elif razao >= 3:
-            f.append(("MÉDIO", f"Movimentação {razao:.1f}x acima {base_txt} no período".replace(".", ",")))
-    return f
-
-
-def risco_geral_caso(caso: "Caso") -> str:
-    fatores = fatores_risco_caso(caso)
-    if not fatores:
-        return "BAIXO"
-    pior = max((_NIVEIS[n] for n, _ in fatores))
-    medios = sum(1 for n, _ in fatores if n == "MÉDIO")
-    if pior < 2 and medios >= 3:
-        pior = 2  # vários sinais médios somados viram risco alto
-    return {0: "BAIXO", 1: "MÉDIO", 2: "ALTO"}[pior]
 
 
 # ---------------------------------------------------------------------------
@@ -955,7 +842,6 @@ class ArmazenamentoLocal:
             "numero_caso": caso.numero_caso,
             "nome_cliente": caso.nome_display() or "Sem nome",
             "tipo_caso": caso.tipo_caso,
-            "risco": caso.risco_geral(),
             "diligencia": caso.diligencia or "Pendente",
             "criado_em": caso.criado_em,
             "atualizado_em": caso.atualizado_em,

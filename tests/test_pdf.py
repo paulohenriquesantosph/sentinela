@@ -152,11 +152,12 @@ class TestEscopos(unittest.TestCase):
     def test_completo_tem_as_tres_abas(self):
         t = texto_pdf(self.completo)
         for trecho in [
-            "2026-8058FB", "João Paulo Carvalho Dias", "RISCO ALTO",
+            "2026-8058FB", "João Paulo Carvalho Dias",
             "Alerta / Sentença", "KYC - Know Your Customer", "Resumo de Movimentações", "Thundera - AML 360",
             "Marcos Vinícius Andrade", "53% restante é referente às demais contrapartes de crédito",
             "48% restante é referente às demais contrapartes de débito",
-            "1. Saques:", "CRÉDITOS — VALOR 1", "DÉBITOS — VALOR 6", "Novembro R$1.000,00", "Abril R$160.000,00",
+            "1. Saques:", "CRÉDITOS — VALOR 1", "DÉBITOS — VALOR 6", "Valores Movimentados por Mês",
+            "Novembro R$1.000,00", "Abril R$160.000,00",
             # resolução
             "RESOLUÇÃO DO CASO", "REPORTAR E CANCELAR", "Parecer Final do Analista", "totalmente incompatível",
             "Ausência de Resposta ao EDD", "Comportamento Suspeito e sem Fundamentação",
@@ -169,6 +170,21 @@ class TestEscopos(unittest.TestCase):
             "Processo interno insuficiente", "Boa análise de capacidade financeira",
         ]:
             self.assertIn(trecho, t, f"faltou no PDF completo: {trecho!r}")
+
+    @unittest.skipIf(PdfReader is None, "pypdf ausente")
+    def test_pdf_nao_classifica_risco_nem_diz_se_houve_mudanca(self):
+        t = texto_pdf(self.completo)
+        for proibido in ("RISCO ALTO", "Risco Geral", "Fatores", "Rápida evasão dos recursos", "Padrão",
+                         "Mudança de Comportamento", "Sem mudança de comportamento"):
+            self.assertNotIn(proibido, t, f"não deveria constar no PDF: {proibido!r}")
+
+    def test_html_nao_classifica_risco_nem_diz_se_houve_mudanca(self):
+        import dossie_html
+        html = dossie_html.cabecalho_html(self.caso) + "".join(dossie_html.informacoes_html(self.caso))
+        for proibido in ("Risco ALTO", "Risco MÉDIO", "Fatores considerados", "Padrão", "Mudança de Comportamento"):
+            self.assertNotIn(proibido, html, f"não deveria constar no dossiê: {proibido!r}")
+        self.assertIn("Valores Movimentados por Mês", html)
+        self.assertIn("Abril R$160.000,00", html)
 
     @unittest.skipIf(PdfReader is None, "pypdf ausente")
     def test_resolucao_nao_tem_avaliacao(self):
@@ -263,7 +279,6 @@ class TestRobustez(unittest.TestCase):
         c.data_abertura = "01/01/2020"
         c.ramo_atividade = "Padaria"
         c.presenca_online = "Sim"
-        c.presenca_online_detalhe = "http://exemplo.com/?a=1&b=2"
         c.socios = [Socio(nome="Fulano <script>", idade="40", pep="Sim", tipo_pep="PEP Titular",
                           descricao_pep="Vereador até 2022", regiao_risco="Sim", tipo_regiao_risco="Região de Fronteira"),
                     Socio(nome="Beltrana")]

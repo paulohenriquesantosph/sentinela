@@ -62,14 +62,20 @@ formulário já preenchido para você revisar. Os campos da tela são:</p>
       cadastral, <b>profissão informada</b>, <b>renda presumida</b> (ex.: “renda de R$ 3.500”), registro
       profissional e registro societário (razão social, data de abertura, situação cadastral e ramo).
       O gênero é inferido pelo primeiro nome; se o nome for ambíguo, o formulário pergunta.</li>
-  <li><b>KYC da empresa (PJ):</b> nome, data de abertura, ramo, porte, faturamento presumido, endereço,
-      presença online e fachada. Os <b>sócios</b> só entram se você citar (nome, idade, endereço, renda,
-      patrimônio e os Sim/Não de risco). O sistema não cria sócios que o texto não menciona.</li>
+  <li><b>KYC da empresa (PJ):</b> inclua no Resumo o <b>Nome da Empresa, Data de Abertura, Ramo de
+      Atividade, Porte, Faturamento Presumido, Endereço, Fachada e Presença Online</b>. Fachada e Presença
+      Online vão para o formulário apenas como <b>Sim</b> ou <b>Não</b> (não há campo de detalhe). Os
+      <b>sócios</b> só entram se você citar (nome, idade, endereço, renda, patrimônio e os Sim/Não de risco),
+      exceto quando você disser que mais de um sócio tem o mesmo sinal (ex.: “2 sócios são PEP”): aí o
+      Sentinela cria um sócio para cada um.</li>
   <li><b>Under 18:</b> dados do responsável legal, se o texto falar dele.</li>
   <li><b>Riscos (Sim/Não e detalhe):</b> região de risco (fronteira, extração mineral/madeira ou outra), PEP
-      (titular ou relacionado, com descrição e carência), mídia negativa, histórico de PLD e de fraudes.</li>
-  <li><b>Outras informações relevantes:</b> redes sociais, processos e dados específicos do caso. Veja a
-      seção 4 sobre NuInvest e Crypto.</li>
+      (titular ou relacionado, com descrição e carência), mídia negativa, histórico de PLD e de fraudes.
+      Veja o quadro “Perguntas do KYC” abaixo.</li>
+  <li><b>Outras informações relevantes:</b> qualquer informação adicional de KYC que o resumo trouxer e que
+      não tenha campo próprio (compartilhamento de dispositivo, redes sociais, processos, dados de
+      NuInvest/Crypto e outras informações não convencionais). O Sentinela coloca <b>uma informação por
+      linha</b>. Veja a seção 4.</li>
   <li><b>Resumo de movimentações:</b> período (<code>DD/MM/AAAA até DD/MM/AAAA</code>), <b>total de créditos</b>
       e <b>total de débitos</b>, e <b>número total de contrapartes</b> de cada lado.</li>
   <li><b>Contrapartes:</b> para cada uma, o tipo (PF ou PJ), a <b>porcentagem</b>, o <b>valor</b>, o
@@ -111,6 +117,31 @@ formulário já preenchido para você revisar. Os campos da tela são:</p>
       cargo. Se você não disser as profissões, ele cria <b>cargos aleatórios</b> compatíveis com o perfil.
       Sem essa autorização, ele não inventa nada.</li>
 </ul>
+
+<div class="sx-man-aviso"><b class="t">Perguntas do KYC</b>
+Quando o Resumo indica <b>Sim</b> em um item do KYC, o Sentinela marca <b>Sim</b> no formulário e preenche
+os detalhes que o texto trouxer. Se o <b>Sim</b> vier <b>sem</b> os detalhes, o Sentinela não abre o
+formulário ainda: ele mostra só as perguntas que faltaram, e depois de respondidas você clica em
+<b>Continuar</b>. Os itens são:
+<ul>
+  <li><b>Registro societário</b> (PF): razão social, data de abertura, situação cadastral e ramo de
+      atividade.</li>
+  <li><b>Região de risco:</b> cidade/estado (vai para o campo Cidade/Estado do KYC), o risco da região e,
+      se for “Outras Regiões de Risco”, qual é a região.</li>
+  <li><b>PEP:</b> tipo de PEP e descrição do PEP e carência.</li>
+  <li><b>Mídia negativa:</b> qual é a mídia (link, se houver), data e fonte.</li>
+  <li><b>Histórico de PLD</b> e <b>Histórico de fraude:</b> os detalhes de cada um.</li>
+</ul>
+Isso vale também para os <b>sócios</b> (caso PJ): região de risco (e o risco da região), PEP (tipo e
+descrição/carência), mídia negativa, histórico de PLD e de fraude, sócio por sócio.
+<br/><br/>E vale para as <b>contrapartes</b> do Bloco 3: se o Resumo disser que uma contraparte é sócia de
+empresa (registro societário), é PEP, tem mídia negativa, histórico de PLD, histórico de fraude ou região de
+risco, o Sentinela marca <b>Sim</b> nela e pergunta os detalhes, contraparte por contraparte. Se o Resumo
+disser que <b>mais de uma</b> contraparte tem o mesmo sinal (por exemplo, “3 contrapartes são PEP”), o
+Sentinela <b>cria uma contraparte para cada uma</b>, com o sinal marcado, e pergunta os detalhes de cada
+uma.
+<br/><br/>Para evitar a pergunta, já escreva esses dados no Resumo. Para mudar o Resumo depois de ver as perguntas,
+use <b>Refazer com outro resumo</b>.</div>
 
 <div class="sx-man-aviso"><b class="t">Mudança de comportamento</b>
 Se o Resumo disser que houve mudança de comportamento, aparecem campos extras na tela e o preenchimento só
@@ -196,6 +227,10 @@ Origem dos recursos: transferências de terceiros via Pix</pre>
       depois da geração.</li>
   <li><b>Avaliação de Qualidade:</b> avaliação do caso durante a calibração.</li>
 </ul>
+<p>O dossiê traz <b>somente as informações do caso</b>: ele não classifica o risco do caso nem lista fatores
+de risco. A classificação de risco é feita pelo analista na resolução, durante a calibração. Da mesma forma,
+a Timeline de Transferências mostra apenas os valores de créditos e débitos e o gráfico, e os valores
+movimentados mês a mês aparecem sem indicar se houve ou não mudança de comportamento.</p>
 <p>Use <b>PDF completo (3 abas)</b> no topo do dossiê para baixar tudo em um só arquivo.</p>
 
 <h3>7. Encontrar dossiês depois</h3>
