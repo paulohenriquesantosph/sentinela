@@ -396,14 +396,19 @@ def _preencher_com_ia() -> None:
         erros.append("Sentença")
     if not _txt("ia_resumo"):
         erros.append("Resumo do caso")
+    mudanca = None
+    if ia.menciona_mudanca_comportamento(_txt("ia_resumo")):
+        mudanca, erros_mc = ia.validar_mudanca(
+            _txt("ia_mc_conta"), _txt("ia_data"), _txt("ia_mc_valor"))
+        erros += erros_mc
     if erros:
-        ss.ia_erro = "Preencha: " + ", ".join(erros) + "."
+        ss.ia_erro = "Preencha: " + "; ".join(erros) + "."
         return
     try:
         caso, avisos = ia.preencher_caso_via_ia(
             tipo_caso=ss.tipo_caso_novo or TIPOS_CASO[0],
             fator_gerador=_txt("ia_fator"), data_alerta=_txt("ia_data"), sentenca=_txt("ia_sentenca"),
-            resumo=_txt("ia_resumo"), outras_movimentacoes=_txt("ia_outras"))
+            resumo=_txt("ia_resumo"), outras_movimentacoes=_txt("ia_outras"), mudanca=mudanca)
     except ia.ErroExtracaoIA as e:
         ss.ia_erro = str(e)
         return
@@ -429,6 +434,14 @@ def tela_preenchimento_ia() -> None:
                 "criptomoedas, investimentos). Isso alimenta o campo \"Outras Movimentações\" do Resumo "
                 "de Movimentações.")
     campo("Outras movimentações", "ia_outras", area=True, altura=110, oculto_rotulo=True)
+    if ia.menciona_mudanca_comportamento(_txt("ia_resumo")):
+        estilo.dica("<b>Você citou mudança de comportamento.</b> As movimentações serão descritas em 6 meses: o "
+                    "último é o mês do alerta (mês da mudança) e os outros 5 são os meses anteriores. Se não "
+                    "informar o valor, o Sentinela cria um valor elevado para o mês da mudança, sempre abaixo do "
+                    "total movimentado no período do alerta.")
+        v1, v2 = st.columns(2)
+        campo("Valor do mês da mudança (opcional)", "ia_mc_valor", ph="Ex: R$160.000,00", container=v1)
+        campo("Abertura da conta e/ou último reporte", "ia_mc_conta", obrig=True, ph="DD/MM/AAAA", container=v2)
     if ss.ia_erro:
         estilo.msg_erro(ss.ia_erro)
     with st.spinner("Chamando a IA para preencher o formulário…"):

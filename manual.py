@@ -82,8 +82,7 @@ formulário já preenchido para você revisar. Os campos da tela são:</p>
           quantidade de transações, separando créditos e débitos.</li>
       <li><b>Mensagens Pix:</b> uma linha por grupo de mensagens, com a quantidade e um exemplo da mensagem.</li>
       <li><b>Timeline de transferências:</b> “Rápida Evasão” ou “Sem Rápida Evasão”, se o texto disser.</li>
-      <li><b>Mudança de comportamento:</b> você informa só se houve e o valor aproximado do pico; o texto
-          da narrativa é montado pelo Sentinela.</li>
+      <li><b>Mudança de comportamento:</b> veja o quadro “Mudança de comportamento” abaixo.</li>
       <li><b>Data de abertura da conta / último reporte.</b></li>
     </ul></li>
   <li><b>Outras movimentações:</b> a partir do campo próprio, classificadas como Saques, Boletos, Gastos
@@ -105,10 +104,28 @@ formulário já preenchido para você revisar. Os campos da tela são:</p>
       Se houver (“alta concentração em X”), a principal fica acima de 50%.</li>
   <li><b>Termos vagos:</b> “diversas”, “várias” e “muitas” viram um número plausível (ex.: 12), nunca a
       palavra. Prefira dar o número real.</li>
-  <li><b>Valores a escolher pelo Sentinela:</b> se quiser que ele crie o que faltar, escreva “aleatório”,
-      “invente” ou “à sua escolha”, junto com as restrições (ex.: “renda baixa”, “sem vínculo aparente
-      entre as contrapartes”). Sem essa autorização, ele não inventa nada.</li>
+  <li><b>Contrapartes aleatórias:</b> se quiser que o Sentinela crie o que faltar, escreva “aleatório”,
+      “invente” ou “à sua escolha”, junto com o perfil desejado. Ele cria nomes, idades, cidades, rendas e
+      cargos <b>respeitando a sua instrução</b>. Exemplo: “diversas pessoas físicas, sem capacidade
+      financeira elevada” gera contrapartes com <b>renda presumida baixa</b>, variada e coerente com o
+      cargo. Se você não disser as profissões, ele cria <b>cargos aleatórios</b> compatíveis com o perfil.
+      Sem essa autorização, ele não inventa nada.</li>
 </ul>
+
+<div class="sx-man-aviso"><b class="t">Mudança de comportamento</b>
+Se o Resumo disser que houve mudança de comportamento, aparecem campos extras na tela e o preenchimento só
+continua depois de você respondê-los. As movimentações são descritas em <b>6 meses</b>: o último é o
+<b>mês do alerta</b> (o mês da mudança) e os outros 5 são os <b>meses anteriores</b> à data do alerta. Você
+não precisa informar os meses; basta preencher:
+<ul>
+  <li><b>Valor do mês da mudança</b> (opcional): se você não informar, o Sentinela cria um valor elevado,
+      sempre <b>abaixo do total movimentado no período do alerta</b>. Se você informar um valor maior que
+      o total, o formulário mostra um aviso.</li>
+  <li><b>Abertura da conta e/ou último reporte</b> (<code>DD/MM/AAAA</code>): obrigatório, e precisa ser
+      <b>anterior à data do alerta</b>.</li>
+</ul>
+Nos 5 meses anteriores, o Sentinela usa valores baixos de referência; só o mês do alerta recebe o valor
+elevado.</div>
 
 <div class="sx-man-aviso"><b class="t">Exemplo de Resumo</b>
 <pre>Cliente Maria Souza, 34 anos, Recife/PE, declarou ser professora com renda de R$ 3.200.

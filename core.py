@@ -692,6 +692,38 @@ def gerar_narrativa_mudanca_comportamento(periodo_texto: str, valor_aproximado: 
     return "\n".join(linhas)
 
 
+def pico_mudanca_sugerido(total_credito: float, total_debito: float,
+                          rng: Optional[random.Random] = None) -> str:
+    """Valor elevado para o mês da mudança, sempre abaixo do maior total movimentado
+    no período do alerta (entre 40% e 70% dele, arredondado a R$100)."""
+    rng = rng or random.Random()
+    teto = max(total_credito, total_debito)
+    if teto <= 0:
+        return "R$0,00"
+    valor = teto * rng.uniform(0.4, 0.7)
+    return formatar_brl(min(round(valor / 100.0) * 100.0 or valor, teto))
+
+
+def gerar_narrativa_mudanca_mensal(inicio: date, fim: date, mes_mudanca: date, valor_pico: str) -> str:
+    """Narrativa mês a mês do mês `inicio` ao mês `fim`: os meses comuns recebem os
+    valores-base (repetidos em ciclo) e o mês da mudança recebe o pico."""
+    meses, atual = [], date(inicio.year, inicio.month, 1)
+    while atual <= date(fim.year, fim.month, 1) and len(meses) < 24:
+        meses.append(atual)
+        atual = somar_meses(atual, 1)
+    com_ano = inicio.year != fim.year
+    pico = normalizar_valor_texto(valor_pico) or "R$0,00"
+    linhas, i = [], 0
+    for mes in meses:
+        nome = NOMES_MESES[mes.month - 1] + (f"/{mes.year}" if com_ano else "")
+        if (mes.year, mes.month) == (mes_mudanca.year, mes_mudanca.month):
+            linhas.append(f"{nome} {pico}")
+        else:
+            linhas.append(f"{nome} {VALORES_BASE_MUDANCA[i % len(VALORES_BASE_MUDANCA)]}")
+            i += 1
+    return "\n".join(linhas)
+
+
 # ---------------------------------------------------------------------------
 # Timeline de transferências (gráfico)
 # ---------------------------------------------------------------------------

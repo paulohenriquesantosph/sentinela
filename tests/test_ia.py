@@ -304,6 +304,78 @@ class TestChamada(BaseLLM):
         self.assertEqual(avisos, [])
 
 
+class TestMudancaRespondida(unittest.TestCase):
+    def _caso(self):
+        return Caso(numero_caso="t", tipo_caso="Pessoa Física (PF)",
+                    mov_total_credito="R$500.000,00", mov_total_debito="R$480.000,00")
+
+    def test_detecta_mencao(self):
+        self.assertTrue(ia.menciona_mudanca_comportamento("Houve mudança de comportamento em abril."))
+        self.assertTrue(ia.menciona_mudanca_comportamento("cliente mudou o comportamento recentemente"))
+        self.assertFalse(ia.menciona_mudanca_comportamento("Cliente com renda baixa e 12 contrapartes."))
+
+    def test_validacao_ok(self):
+        dados, erros = ia.validar_mudanca("10/01/2025", "15/06/2026")
+        self.assertEqual(erros, [])
+        self.assertEqual((dados["inicio"], dados["fim"], dados["mes_mudanca"]),
+                         (date(2026, 1, 1), date(2026, 6, 1), date(2026, 6, 1)))
+
+    def test_validacao_erros(self):
+        _, erros = ia.validar_mudanca("", "15/06/2026")
+        self.assertIn("abertura da conta", " ".join(erros))
+        _, erros = ia.validar_mudanca("15/06/2026", "15/06/2026")  # mesma data: não é anterior
+        self.assertIn("anterior à data do alerta", " ".join(erros))
+        _, erros = ia.validar_mudanca("10/07/2026", "15/06/2026")
+        self.assertIn("anterior à data do alerta", " ".join(erros))
+        _, erros = ia.validar_mudanca("10/01/2025", "")
+        self.assertIn("Data do alerta", " ".join(erros))
+
+    def test_narrativa_seis_meses_terminando_no_alerta(self):
+        caso = self._caso()
+        dados, _ = ia.validar_mudanca("10/01/2025", "15/06/2026", "R$160.000,00")
+        avisos = []
+        ia.aplicar_mudanca_respondida(caso, dados, avisos)
+        self.assertEqual(caso.comp_mudanca_comportamento.split("\n"), [
+            "Janeiro R$1.000,00", "Fevereiro R$1.500,00", "Março R$2.000,00",
+            "Abril R$0,00", "Maio R$0,10", "Junho R$160.000,00"])
+        self.assertEqual(caso.comp_data_abertura_ultimo_reporte, "10/01/2025")
+        self.assertEqual(avisos, [])
+
+    def test_virada_de_ano_inclui_o_ano(self):
+        caso = self._caso()
+        dados, _ = ia.validar_mudanca("10/01/2025", "10/02/2026", "R$1,00")
+        ia.aplicar_mudanca_respondida(caso, dados, [])
+        linhas = caso.comp_mudanca_comportamento.split("\n")
+        self.assertEqual((linhas[0], linhas[-1]), ("Setembro/2025 R$1.000,00", "Fevereiro/2026 R$1,00"))
+
+    def test_valor_criado_respeita_total_do_periodo(self):
+        for _ in range(30):
+            caso = self._caso()
+            dados, _ = ia.validar_mudanca("10/01/2025", "15/03/2026")
+            avisos = []
+            ia.aplicar_mudanca_respondida(caso, dados, avisos)
+            pico = caso.comp_mudanca_comportamento.split("\n")[-1].split(" ")[-1]
+            self.assertLessEqual(core_parse(pico), 500000.0)
+            self.assertGreater(core_parse(pico), 100000.0)
+            self.assertEqual(len(avisos), 1)
+
+    def test_valor_informado_acima_do_total_gera_aviso(self):
+        caso = self._caso()
+        dados, _ = ia.validar_mudanca("10/01/2025", "15/03/2026", "R$900.000,00")
+        avisos = []
+        ia.aplicar_mudanca_respondida(caso, dados, avisos)
+        self.assertIn("maior que o total", avisos[0])
+
+    def test_regras_de_invencao_no_prompt(self):
+        self.assertIn("rendaPresumida BAIXA", ia.SYSTEM_PROMPT_PF)
+        self.assertIn("cargos aleatórios", ia.SYSTEM_PROMPT_PF)
+
+
+def core_parse(v):
+    from core import parse_valor_br
+    return parse_valor_br(v)
+
+
 class TestAplicar(unittest.TestCase):
     def test_narrativa_mudanca_de_comportamento(self):
         caso = ia.aplicar_dados_extraidos(Caso(numero_caso="t", tipo_caso="Pessoa Física (PF)"), dados_joao(), HOJE)

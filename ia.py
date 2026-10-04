@@ -43,6 +43,7 @@ from core import (
     TIPOS_PEP, TIPOS_OUTRAS_MOV, parse_valor_br, formatar_brl,
     normalizar_valor_texto, parse_periodo, periodo_padrao,
     gerar_narrativa_mudanca_comportamento, inferir_genero,
+    gerar_narrativa_mudanca_mensal, pico_mudanca_sugerido, parse_data_br, somar_meses,
 )
 
 
@@ -137,7 +138,8 @@ REGRAS (siga todas):
 9. Cada contraparte traz o mini-KYC (registroSocietario, regiaoRisco, pep, historicoPld, historicoFraude, midiaNegativa): "Sim" ou "Não"; na falta de informação, "Não".
 10. A seção outrasMovimentacoes (saques, boletos, cartões, empréstimos, criptomoedas, investimentos) vem EXCLUSIVAMENTE do bloco "OUTRAS MOVIMENTAÇÕES (NÃO BANCÁRIAS)" da mensagem. O que estiver no bloco "RESUMO DO CASO" não vai para essa seção; se o bloco de outras movimentações estiver vazio, devolva [].
 11. Se não houver período no texto, deixe periodo "". Seja conciso nos campos de texto livre.
-12. Saída: APENAS um objeto JSON válido, sem markdown, sem crases e sem texto antes ou depois.
+12. Com INVENÇÃO AUTORIZADA: SIM e pedido de contrapartes aleatórias, crie nomes, idades, cidades/estados, rendas e cargos plausíveis, OBEDECENDO ao perfil pedido. Ex.: "diversas pessoas físicas sem capacidade financeira elevada" -> rendaPresumida BAIXA e variada em cada contraparte (ex.: R$1.300,00 a R$3.500,00), coerente com o cargo. Se o texto não disser as profissões, crie cargos aleatórios compatíveis com o perfil (ex.: auxiliar administrativo, vendedor, atendente, motorista, diarista) em registroProfissional. Perfil de empresa (PJ): ramo, porte e faturamento compatíveis com o pedido. Nunca contrarie uma instrução dada.
+13. Saída: APENAS um objeto JSON válido, sem markdown, sem crases e sem texto antes ou depois.
 """
 
 _REGRAS_PJ = """
@@ -187,6 +189,34 @@ _RE_INVENCAO = re.compile(
 def autoriza_invencao(texto: str) -> bool:
     """True se o texto autoriza a IA a criar valores ('aleatório', 'invente', 'à sua escolha'...)."""
     return bool(_RE_INVENCAO.search(_sem_acento(texto)))
+
+
+_RE_MUDANCA = re.compile(r"(?:mudanca|mudou|alteracao|alterou)\s+(?:de\s+|o\s+|do\s+|no\s+)?(?:seu\s+)?comportament")
+
+
+def menciona_mudanca_comportamento(texto: str) -> bool:
+    """True se o texto diz que houve mudança de comportamento (aí o app pergunta os meses)."""
+    return bool(_RE_MUDANCA.search(_sem_acento(texto)))
+
+
+def validar_mudanca(data_conta: str, data_alerta: str, valor: str = "") -> Tuple[Dict[str, Any], List[str]]:
+    """Valida as respostas sobre a mudança de comportamento. Devolve (dados, erros).
+
+    A janela é sempre de 6 meses: o último é o mês do alerta (mês da mudança) e os 5
+    anteriores vêm antes dele. A abertura da conta/último reporte tem de ser anterior
+    à data do alerta."""
+    erros: List[str] = []
+    alerta = parse_data_br(data_alerta)
+    conta = parse_data_br(data_conta)
+    if not alerta:
+        erros.append("Data do alerta válida (DD/MM/AAAA), usada para definir os 6 meses")
+    if not conta:
+        erros.append("Data de abertura da conta e/ou último reporte (use DD/MM/AAAA)")
+    elif alerta and conta >= alerta:
+        erros.append("A data de abertura/último reporte deve ser anterior à data do alerta")
+    fim = date(alerta.year, alerta.month, 1) if alerta else None
+    return {"inicio": somar_meses(fim, -5) if fim else None, "fim": fim, "mes_mudanca": fim,
+            "data_conta": (data_conta or "").strip(), "valor": (valor or "").strip()}, erros
 
 
 def _menciona_concentracao(texto: str) -> bool:
@@ -767,8 +797,29 @@ def completar_obrigatorios(caso: Caso, hoje: Optional[date] = None) -> Caso:
 # Orquestração
 # ---------------------------------------------------------------------------
 
+def aplicar_mudanca_respondida(caso: Caso, mudanca: Dict[str, Any], avisos: List[str]) -> None:
+    """Monta a narrativa com os meses que o analista informou e a data de abertura/último reporte.
+    Sem valor informado, cria um pico elevado abaixo do total movimentado no período."""
+    total_c, total_d = parse_valor_br(caso.mov_total_credito), parse_valor_br(caso.mov_total_debito)
+    teto = max(total_c, total_d)
+    valor = mudanca.get("valor") or ""
+    if valor:
+        if teto and parse_valor_br(valor) > teto:
+            avisos.append(f"O valor do mês da mudança ({normalizar_valor_texto(valor)}) é maior que o total "
+                          f"movimentado no período ({formatar_brl(teto)}). Confira.")
+    else:
+        valor = pico_mudanca_sugerido(total_c, total_d)
+        avisos.append(f"Valor do mês da mudança criado pelo Sentinela ({valor}), abaixo do total movimentado "
+                      "no período. Ajuste se necessário.")
+    caso.comp_mudanca_comportamento = gerar_narrativa_mudanca_mensal(
+        mudanca["inicio"], mudanca["fim"], mudanca["mes_mudanca"], valor)
+    if mudanca.get("data_conta"):
+        caso.comp_data_abertura_ultimo_reporte = mudanca["data_conta"]
+
+
 def preencher_caso_via_ia(tipo_caso: str, fator_gerador: str, data_alerta: str, sentenca: str,
                           resumo: str, outras_movimentacoes: str = "", hoje: Optional[date] = None,
+                          mudanca: Optional[Dict[str, Any]] = None,
                           **kw: Any) -> Tuple[Caso, List[str]]:
     """Extrai, aplica, ajusta a coerência e completa os obrigatórios.
     Devolve (caso, avisos). Os três campos do alerta são copiados como o analista digitou."""
@@ -780,5 +831,7 @@ def preencher_caso_via_ia(tipo_caso: str, fator_gerador: str, data_alerta: str, 
     aplicar_dados_extraidos(caso, dados, hoje)
     texto_total = f"{resumo}\n{outras_movimentacoes}"
     avisos = coerencia_extracao(caso, texto_total)
+    if mudanca:
+        aplicar_mudanca_respondida(caso, mudanca, avisos)
     completar_obrigatorios(caso, hoje)
     return caso, avisos
