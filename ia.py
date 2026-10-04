@@ -131,7 +131,7 @@ SCHEMA_EXTRACAO_PJ = (
 
 _REGRAS = """
 REGRAS (siga todas):
-1. Preencha SOMENTE o que o texto afirma. Se uma informação não está no texto, use "" (ou [] para listas); não presuma relações, motivações nem conclusões. EXCEÇÃO: se a primeira linha da mensagem do usuário for "INVENÇÃO AUTORIZADA: SIM" (o texto pediu algo como "aleatório", "invente" ou "à sua escolha"), crie valores plausíveis para o que faltar, respeitando as restrições dadas (ex.: "renda baixa", "sem vínculo aparente"). Com "INVENÇÃO AUTORIZADA: NÃO", nunca invente.
+1. Preencha SOMENTE o que o texto afirma. Se uma informação não está no texto, use "" (ou [] para listas); não presuma relações, motivações nem conclusões. EXCEÇÃO: se a primeira linha da mensagem do usuário for "INVENÇÃO AUTORIZADA: SIM" (o texto pediu algo como "aleatório", "invente" ou "à sua escolha"), crie valores plausíveis para o que faltar, respeitando as restrições dadas (ex.: "renda baixa", "sem vínculo aparente"). Com "INVENÇÃO AUTORIZADA: NÃO", nunca invente, SALVO nas exceções das regras 20 a 23, que valem sempre.
 2. Distinga Profissão informada (o que o CLIENTE declarou) de Registro profissional (constatação do ANALISTA sobre a ocupação real). Na dúvida, coloque no registroProfissional.
 3. Muitas contrapartes: informe o total como NÚMERO em totalContrapartesCredito/totalContrapartesDebito e descreva apenas as 3 a 5 principais em cada lista. O restante é calculado pelo dossiê; não crie contrapartes "demais".
 4. Mantenha percentuais e valores coerentes com os totais (valor = porcentagem x total do lado). Sem menção a concentração no texto, NENHUMA contraparte passa de 50% do total; com concentração mencionada, a principal fica acima de 50%. A soma das porcentagens listadas nunca passa de 100%.
@@ -142,15 +142,19 @@ REGRAS (siga todas):
 9. Cada contraparte traz o mini-KYC (registroSocietario, regiaoRisco, pep, historicoPld, historicoFraude, midiaNegativa): "Sim" ou "Não"; na falta de informação, "Não".
 10. A seção outrasMovimentacoes (saques, boletos, cartões, empréstimos, criptomoedas, investimentos) vem EXCLUSIVAMENTE do bloco "OUTRAS MOVIMENTAÇÕES (NÃO BANCÁRIAS)" da mensagem. O que estiver no bloco "RESUMO DO CASO" não vai para essa seção; se o bloco de outras movimentações estiver vazio, devolva [].
 11. Se não houver período no texto, deixe periodo "". Seja conciso nos campos de texto livre.
-12. Com INVENÇÃO AUTORIZADA: SIM e pedido de contrapartes aleatórias, crie nomes, idades, cidades/estados, rendas e cargos plausíveis, OBEDECENDO ao perfil pedido. Ex.: "diversas pessoas físicas sem capacidade financeira elevada" -> rendaPresumida BAIXA e variada em cada contraparte (ex.: R$1.300,00 a R$3.500,00), coerente com o cargo. Se o texto não disser as profissões, crie cargos aleatórios compatíveis com o perfil (ex.: auxiliar administrativo, vendedor, atendente, motorista, diarista) em registroProfissional. Perfil de empresa (PJ): ramo, porte e faturamento compatíveis com o pedido. Nunca contrarie uma instrução dada.
+12. Com INVENÇÃO AUTORIZADA: SIM e pedido de contrapartes aleatórias, crie nomes, idades, cidades/estados, rendas e cargos plausíveis, OBEDECENDO ao perfil pedido. Ex.: "diversas pessoas físicas sem capacidade financeira elevada" -> rendaPresumida BAIXA e variada em cada contraparte (ex.: R$1.300,00 a R$3.200,00), coerente com o cargo. Se o texto não disser as profissões, crie cargos aleatórios compatíveis com o perfil (ex.: auxiliar administrativo, vendedor, atendente, motorista, diarista) em registroProfissional. Perfil de empresa (PJ): ramo, porte e faturamento compatíveis com o pedido. Nunca contrarie uma instrução dada.
 13. KYC: registroSocietario = "Sim" só se o texto disser que o cliente tem registro societário; nesse caso preencha registroSocietarioDetalhes (razaoSocial, dataAbertura, situacaoCadastral, ramoAtividade) com o que o texto trouxer. Região de risco: se o texto indicar cidade/estado da região, coloque em cidadeEstado (PF); se o tipo for "Outras Regiões de Risco", descreva a região em descricaoRegiaoRisco. PEP: tipoPep e descricaoPep (cargo e carência). Mídia negativa, histórico de PLD e de fraude: detalhe (link, data e fonte, quando houver) em seus campos "...Detalhe". Nunca invente detalhes que o texto não traz (sem INVENÇÃO AUTORIZADA).
 14. outrasInformacoes: coloque aqui TODA informação adicional de KYC que o texto trouxer e que não tenha campo próprio (compartilhamento de dispositivo, redes sociais, processos, dados específicos de NuInvest/Crypto e outras informações não convencionais), UMA INFORMAÇÃO POR LINHA, separadas por quebra de linha, no formato "Rótulo: valor". Não repita o que já tem campo próprio.
-15. Contrapartes com sinais de KYC (sócia de empresa/registro societário, PEP, mídia negativa, histórico de PLD, histórico de fraude, região de risco): marque "Sim" no item de CADA contraparte envolvida e preencha o campo "...Detalhe" correspondente com o que o texto trouxer. Se o texto indicar MAIS DE UMA contraparte com o sinal (ex.: "3 contrapartes são PEP"), CRIE uma entrada por contraparte na lista (mesmo passando de 5 entradas), cada uma com o sinal marcado, mantendo valores e porcentagens coerentes com o total. Sem INVENÇÃO AUTORIZADA, deixe nome e demais dados dessas contrapartes em branco; com INVENÇÃO AUTORIZADA, crie-os respeitando a regra 12. Nunca invente os detalhes dos sinais.
+15. Contrapartes com sinais de KYC (sócia de empresa/registro societário, PEP, mídia negativa, histórico de PLD, histórico de fraude, região de risco): marque "Sim" no item de CADA contraparte envolvida e preencha o campo "...Detalhe" correspondente com o que o texto trouxer. Se o texto indicar MAIS DE UMA contraparte com o sinal (ex.: "3 contrapartes são PEP"), CRIE uma entrada por contraparte na lista (mesmo passando de 5 entradas), cada uma com o sinal marcado, mantendo valores e porcentagens coerentes com o total. Nome, idade, cidade/estado e data de abertura dessas contrapartes seguem a regra 20. Nunca invente os detalhes dos sinais.
 16. FRAGMENTAÇÃO (linha "FRAGMENTAÇÃO: SIM"): fragmentação = ALTO número de contrapartes. Coloque em totalContrapartesCredito e/ou totalContrapartesDebito um número alto (ex.: entre 60 e 200; use o número do texto, se houver) e NÃO indique concentração em nenhuma contraparte: as descritas ficam com porcentagens baixas e DIFERENTES entre si (ex.: 7%, 5%, 3,5%, 2%), NUNCA todas iguais nem todas no teto; nenhuma passa de cerca de 8% e nenhuma prevalece sobre as demais. Vale para os lados citados no texto (crédito, débito ou ambos, se não especificado). Esta regra prevalece sobre a regra 4.
 17. FRACIONAMENTO ENTRE CONTRAPARTES (linha "FRACIONAMENTO ENTRE CONTRAPARTES: SIM"): alto fracionamento = CADA contraparte enviou ou recebeu um ALTO número de transações. Em numTransacoes de TODAS as contrapartes descritas coloque números altos (ex.: entre 30 e 150 cada), em crédito e em débito, com valor médio por transação plausível (valor da contraparte / numTransacoes).
 17b. Se as linhas "FRAGMENTAÇÃO: SIM" e "FRACIONAMENTO ENTRE CONTRAPARTES: SIM" aparecerem JUNTAS, os DOIS comportamentos existem ao mesmo tempo: total alto de contrapartes (regra 16) E alto número de transações em cada contraparte descrita (regra 17).
 18. ARREDONDAMENTO DIVERSO (linha "ARREDONDAMENTO DIVERSO: SIM"): o texto fala em várias transações em valores arredondados/unidades de milhar sem dar os números. Crie VÁRIAS linhas em arredondamentoItens, uma por valor de referência e por lado (Créditos e Débitos), com "arredondamento": "Sim". Ex.: 43 transações de R$1.000,00 nos créditos e 54 nos débitos; 20 de R$2.000,00 nos créditos e 33 nos débitos; 9 de R$5.000,00 nos créditos e 12 nos débitos; e assim sucessivamente (valores de referência crescentes, quantidades altas e geralmente decrescentes). A soma (quantidade x valor) de cada lado nunca passa do total do lado. Se o texto trouxer os números, use os do texto.
-19. Saída: APENAS um objeto JSON válido, sem markdown, sem crases e sem texto antes ou depois.
+20. PREENCHIMENTO ALEATÓRIO SEMPRE PERMITIDO (exceção à regra 1, mesmo com INVENÇÃO AUTORIZADA: NÃO), em QUALQUER tipo de caso: CONTRAPARTES (PF e PJ). Se o texto não informar nome, idade (PF), cidade/estado ou data de abertura (PJ), INVENTE valores plausíveis e diferentes entre as contrapartes; SEMPRE crie nomes aleatórios quando não houver nome (contraparte PJ: nome coerente com o ramo de atividade). Isso vale para as contrapartes que existem; a quantidade de entradas segue as demais regras.
+21. LOCALIDADE DAS CONTRAPARTES (linha "LOCALIDADE DAS CONTRAPARTES"), em QUALQUER tipo de caso: "MESMA" = todas moram na mesma cidade/estado do titular (use a cidade/estado do titular em cidadeEstado de cada contraparte). "DIFERENTE" (localidades diferentes do titular ou sem vínculo aparente) = cada contraparte em OUTRA cidade/estado, aleatórios e variados, nunca a do titular. Sem a linha, só preencha o que o texto disser.
+22. RENDA PRESUMIDA DAS CONTRAPARTES PF, em QUALQUER tipo de caso: se o texto indicar renda BAIXA (qualquer termo: baixa, modesta, sem capacidade financeira, reduzida etc.), preencha rendaPresumida com um valor aleatório BAIXO, entre R$1.300,00 e R$3.200,00 (até cerca de 2 salários mínimos; salário mínimo 2026 = R$1.621,00). Se indicar renda ALTA (qualquer termo: alta, elevada, alto poder aquisitivo etc.), preencha com um valor aleatório ALTO, entre R$35.000,00 e R$150.000,00 (acima de 20 salários mínimos, o patamar da classe A no Brasil). Cada contraparte recebe um valor DIFERENTE dos demais; nunca repita o mesmo valor em todas.
+23. FATURAMENTO PRESUMIDO E PORTE (empresas): o faturamento presumido é ANUAL e o porte segue a receita bruta anual da regulamentação brasileira (LC 123/2006 e BNDES): MEI até R$81.000,00; Microempresa (ME) até R$360.000,00; Pequeno Porte (EPP) de R$360.000,01 a R$4.800.000,00; Médio Porte de R$4.800.000,01 a R$300.000.000,00; Grande Porte acima de R$300.000.000,00. Aplique às CONTRAPARTES PJ de qualquer tipo de caso. Faturamento BAIXO = até R$100.000,00: valor aleatório entre R$20.000,00 e R$100.000,00 (porte MEI ou Microempresa). Faturamento ELEVADO: use o porte informado e um valor aleatório dentro da faixa dele (Pequeno Porte, Médio Porte ou Grande Porte; Grande entre R$300.000.000,00 e R$2.000.000.000,00); se o porte não vier, use Médio Porte. Se o texto trouxer o valor, use-o e deduza o porte pela tabela.
+24. Saída: APENAS um objeto JSON válido, sem markdown, sem crases e sem texto antes ou depois.
 """
 
 _REGRAS_PJ = """
@@ -158,12 +162,15 @@ REGRAS ESPECÍFICAS DE PESSOA JURÍDICA:
 - O titular do caso é uma EMPRESA: preencha nomeEmpresa, dataAbertura, ramoAtividade, porte, faturamentoPresumido e endereco. Presença online e fachada da empresa são só "Sim" ou "Não" (presencaOnline, fachadaEmpresa), sem detalhes; deixe "" se o texto não falar.
 - Informações sobre os sócios vão em "socios" (nome, idade, endereco, rendaPresumida, patrimonio, regiaoRisco, tipoRegiaoRisco, pep, tipoPep, descricaoPep, historicoPld, historicoFraude, midiaNegativa e os campos "...Detalhe"). Marque "Sim" em cada sócio envolvido e preencha só os detalhes que o texto trouxer. Não crie sócios que o texto não cite, EXCETO quando o texto indicar mais de um sócio com um sinal (ex.: "2 sócios são PEP"): aí CRIE uma entrada por sócio, cada uma com o sinal marcado; sem INVENÇÃO AUTORIZADA deixe nome e demais dados em branco, com INVENÇÃO AUTORIZADA crie-os. Nunca invente os detalhes dos sinais.
 - Não preencha campos de pessoa física do titular (nome, idade, renda).
+- EXCEÇÕES ALEATÓRIAS DA PJ (valem sempre, como a regra 20): se não houver nome da empresa, invente um coerente com o ramo de atividade. Se faltarem nome, idade ou renda presumida de um sócio, invente valores plausíveis; endereço do sócio não informado = o mesmo endereço da empresa.
+- Aplique a regra 23 (faturamento presumido e porte) também ao TITULAR PJ. Na regra 21, a cidade/estado do titular é a da empresa, extraída do endereço.
 """
 
 _REGRAS_PF = """
 REGRAS ESPECÍFICAS DE PESSOA FÍSICA (inclui Cripto, NuInvest e Under 18):
 - O titular é uma PESSOA: preencha nome, idade, cidadeEstado, ultimaAtualizacaoCadastral, profissaoInformada, rendaPresumida, registroProfissional e os campos de risco.
 - "responsavelLegal" só deve ser preenchido se o texto falar do responsável legal de um menor de idade; caso contrário, deixe os campos "".
+- Aplique a regra 22 (renda baixa ou alta, com os mesmos valores aleatórios) também à rendaPresumida do TITULAR e, no Under 18, à renda presumida do responsável legal. Na regra 21, a cidade/estado do titular é a cidadeEstado dele.
 """
 
 SYSTEM_PROMPT_PF = (
@@ -253,6 +260,24 @@ def menciona_arredondamento_diverso(texto: str) -> bool:
     return bool(_RE_ARRED.search(t) and _RE_ARRED_VAGO.search(t))
 
 
+_RE_MESMA_LOC = re.compile(r"mesma[s]?\s+(?:localidade|cidade|regiao|praca)|mesmo\s+(?:estado|municipio)"
+                           r"|mesmas\s+localidades|mesma\s+cidade/estado|moram\s+na\s+mesma|residem\s+na\s+mesma")
+_RE_DIF_LOC = re.compile(r"(?:localidades|cidades|estados|regioes|municipios)\s+(?:diferentes|distintos[as]?|distintas)"
+                         r"|localidade\s+diferente|cidade\s+diferente|estado\s+diferente|outras?\s+(?:cidades|localidades)"
+                         r"|sem\s+(?:vinculo|relacao|ligacao)\s+aparente|sem\s+vinculo|distantes?\s+do\s+titular"
+                         r"|diferentes?\s+do\s+titular|diferentes?\s+do\s+cliente")
+
+
+def localidade_contrapartes(texto: str) -> str:
+    """'MESMA' (contrapartes na cidade/estado do titular), 'DIFERENTE' (outras cidades/estados) ou ''."""
+    t = _sem_acento(texto)
+    if _RE_DIF_LOC.search(t):
+        return "DIFERENTE"
+    if _RE_MESMA_LOC.search(t):
+        return "MESMA"
+    return ""
+
+
 def _menciona_concentracao(texto: str) -> bool:
     return "concentra" in _sem_acento(texto)
 
@@ -294,7 +319,8 @@ def montar_mensagem_usuario(texto: str, texto_outras_movimentacoes: str = "") ->
         f"INVENÇÃO AUTORIZADA: {sn(invencao)}\n"
         f"FRAGMENTAÇÃO: {sn(menciona_fragmentacao(texto))}\n"
         f"FRACIONAMENTO ENTRE CONTRAPARTES: {sn(menciona_fracionamento(texto))}\n"
-        f"ARREDONDAMENTO DIVERSO: {sn(menciona_arredondamento_diverso(texto))}\n\n"
+        f"ARREDONDAMENTO DIVERSO: {sn(menciona_arredondamento_diverso(texto))}\n"
+        f"LOCALIDADE DAS CONTRAPARTES: {localidade_contrapartes(texto) or 'NÃO INFORMADA'}\n\n"
         "### RESUMO DO CASO\n" + (texto or "").strip() + "\n\n"
         "### OUTRAS MOVIMENTAÇÕES (NÃO BANCÁRIAS)\n" + (outras or "(vazio)")
     )
@@ -819,6 +845,30 @@ def coerencia_extracao(caso: Caso, texto: str = "", invencao_autorizada: Optiona
                     avisos.append(
                         f"A contraparte de {rotulo} {c.nome or '(sem nome)'} tem {c.porcentagem} do total, mas o "
                         "texto não menciona concentração. Confira o percentual.")
+    # localidade das contrapartes
+    loc = localidade_contrapartes(texto)
+    cidade_titular = (caso.cidade_estado or "").strip()
+    if loc == "MESMA" and cidade_titular and not caso.eh_pj():
+        for lista in (caso.contrapartes_credito, caso.contrapartes_debito):
+            for c in lista:
+                c.cidade_estado = cidade_titular
+    elif loc == "DIFERENTE" and cidade_titular and not caso.eh_pj():
+        for rotulo, lista in (("crédito", caso.contrapartes_credito), ("débito", caso.contrapartes_debito)):
+            iguais = [c for c in lista if (c.cidade_estado or "").strip().lower() == cidade_titular.lower()]
+            if iguais:
+                avisos.append(f"O texto pede contrapartes de localidades diferentes do titular, mas {len(iguais)} "
+                              f"contraparte(s) de {rotulo} estão em {cidade_titular}. Confira.")
+    # rendas iguais entre contrapartes PF / sócios
+    for rotulo, lista in (("crédito", caso.contrapartes_credito), ("débito", caso.contrapartes_debito)):
+        rendas = [c.renda_presumida.strip() for c in lista if c.tipo != "Pessoa Jurídica" and (c.renda_presumida or "").strip()]
+        if len(rendas) >= 3 and len(set(rendas)) == 1:
+            avisos.append(f"As contrapartes de {rotulo} têm todas a mesma renda presumida ({rendas[0]}). "
+                          "Varie os valores entre elas.")
+    # endereço do sócio não informado = endereço da empresa
+    if caso.eh_pj() and (caso.endereco or "").strip():
+        for so in caso.socios:
+            if not (so.endereco or "").strip():
+                so.endereco = caso.endereco
     # arredondamento: quantidade x valor não pode passar do total do lado
     for rotulo_lado, cd, attr_total in (("créditos", "Créditos", "mov_total_credito"),
                                         ("débitos", "Débitos", "mov_total_debito")):

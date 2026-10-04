@@ -608,6 +608,12 @@ def _aba_resolucao(ctx: _Ctx, caso) -> List[Any]:
                            _lista_marcada(ctx, list(caso.razoes_clear_selecionadas or [])))
     out += _card_resolucao(ctx, caso, "Razões de Cancelamento", "razoes_cancelamento",
                            _lista_marcada(ctx, list(caso.razoes_cancelamento_selecionadas or [])))
+    if caso.tipo_caso == core.TIPO_CRIPTO:
+        anexos = caso.lista_anexos()
+        out += _card_resolucao(ctx, caso, "Anexos", "anexos",
+                               [Paragraph(f"&bull; {_t(a)}", ParagraphStyle("an", parent=ctx.st["texto"], leftIndent=12,
+                                                                            firstLineIndent=-12)) for a in anexos]
+                               or [_texto(ctx, "", "Nenhum anexo informado.", "texto_peq")])
     out += _card_resolucao(ctx, caso, "Diligência", "diligencia",
                            [Paragraph(f"<b>{_t(caso.diligencia, 'Pendente')}</b>", ctx.st["texto"])])
     if caso.resolucao_bloqueada_em:

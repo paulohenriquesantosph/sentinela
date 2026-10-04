@@ -34,8 +34,8 @@ from core import (
     renderizar_timeline_png, calcular_nota_scorecard, listar_drivers_scorecard, faixa_nota,
     formatar_nota, estilo_diligencia, inferir_genero, validar_caso, parse_valor_br,
     agora_iso, formatar_data_br, formatar_brl,
-    TIPOS_CASO, TIPO_PJ, TIPO_UNDER18, TIPOS_REGIAO_RISCO_1, TIPOS_PEP, TIPOS_CONTRAPARTE,
-    TIPOS_OUTRAS_MOV, OPCOES_EVASAO, SECOES_RESOLUCAO,
+    TIPOS_CASO, TIPO_PJ, TIPO_UNDER18, TIPO_CRIPTO, TIPOS_REGIAO_RISCO_1, TIPOS_PEP, TIPOS_CONTRAPARTE,
+    TIPOS_OUTRAS_MOV, OPCOES_EVASAO,
 )
 from opcoes import (
     DILIGENCIAS, RAZOES_CLEAR, RAZOES_CANCELAMENTO, JURISPRUDENCIA_NUPAGAMENTOS,
@@ -489,6 +489,13 @@ def tela_preenchimento_ia() -> None:
                     "Ramo de Atividade, Porte, Faturamento Presumido, Endereço, Fachada</b> (Sim ou Não) e "
                     "<b>Presença Online</b> (Sim ou Não). Fachada e Presença Online vão para o formulário "
                     "apenas como Sim ou Não.")
+        estilo.dica("<b>Caso PJ — dados do sócio.</b> Para cada sócio, inclua: <b>Nome, Idade, Endereço, Renda "
+                    "Presumida, Patrimônio</b> e, se houver, <b>Região de Risco, PEP, Mídia Negativa, Histórico de "
+                    "PLD e Histórico de Fraude</b>. Sem endereço do sócio, vale o endereço da empresa.")
+    elif ss.tipo_caso_novo == TIPO_UNDER18:
+        estilo.dica("<b>Caso Under 18 — dados do responsável legal.</b> Inclua no resumo: <b>Nome do responsável "
+                    "legal, Renda Presumida, Registro Profissional, Registro Societário, Histórico de PLD e "
+                    "Histórico de Fraude</b> do responsável legal pelo menor de idade.")
     estilo.dica("Cole ou digite um resumo com as informações do caso (cliente, movimentação, contrapartes, "
                 "comportamento) para o Sentinela tentar preencher os campos automaticamente.")
     campo("Resumo do caso", "ia_resumo", area=True, altura=170, oculto_rotulo=True, desabilitado=bloq)
@@ -887,6 +894,7 @@ def _res_valor(caso: Caso, secao: str) -> Any:
         "jurisprudencias": caso.jurisprudencias_selecionadas,
         "razoes_clear": caso.razoes_clear_selecionadas,
         "razoes_cancelamento": caso.razoes_cancelamento_selecionadas,
+        "anexos": caso.anexos,
         "diligencia": caso.diligencia,
     }[secao]
 
@@ -910,6 +918,8 @@ def _res_ler_widgets(caso: Caso, secao: str) -> None:
         caso.razoes_cancelamento_selecionadas = [
             o for i, o in enumerate(RAZOES_CANCELAMENTO)
             if ss.get(f"res_{n}_canc_{i}", o in caso.razoes_cancelamento_selecionadas)]
+    elif secao == "anexos":
+        caso.anexos = ss.get(f"res_{n}_anexos", caso.anexos)
     elif secao == "diligencia":
         v = ss.get(f"res_{n}_diligencia", caso.diligencia)
         caso.diligencia = v if v in DILIGENCIAS else ""
@@ -936,7 +946,7 @@ def _salvar_caso_inteiro(numero: str) -> None:
     if not caso:
         return
     agora = agora_iso()
-    for secao in SECOES_RESOLUCAO:
+    for secao in caso.secoes_resolucao():
         if secao not in caso.resolucao_salva_em:
             _res_ler_widgets(caso, secao)
             caso.resolucao_salva_em[secao] = agora
@@ -984,6 +994,9 @@ def _resumo_secao(caso: Caso, secao: str) -> str:
         return f"{len(caso.razoes_clear_selecionadas)} selecionada(s) — "
     if secao == "razoes_cancelamento":
         return f"{len(caso.razoes_cancelamento_selecionadas)} selecionada(s) — "
+    if secao == "anexos":
+        n = len(caso.lista_anexos())
+        return f"{n} anexo(s) — " if n else "Nenhum anexo — "
     if secao == "diligencia" and caso.diligencia:
         return f"{caso.diligencia} — "
     return ""
@@ -996,9 +1009,9 @@ def _checkboxes(caso: Caso, prefixo: str, opcoes: List[str], marcadas: List[str]
         st.checkbox(o, key=chave, disabled=travada)
 
 
-def _aba_resolucao(caso: Caso) -> None:
+def _barra_salvar_resolucao(caso: Caso) -> None:
+    """Salvar informações do caso + PDF: sempre no fim da aba, abaixo da Diligência."""
     n = caso.numero_caso
-    _selo_do_caso(caso)
     with estilo.cartao():
         a1, a2, _ = st.columns([1.2, 1.3, 1])
         with a1:
@@ -1021,6 +1034,11 @@ def _aba_resolucao(caso: Caso) -> None:
         else:
             estilo.nota("O botão de PDF fica disponível depois de clicar em \"Salvar informações do caso\". "
                         "O PDF gerado aqui inclui apenas as abas Informações do Caso e Resolução do Caso.")
+
+
+def _aba_resolucao(caso: Caso) -> None:
+    n = caso.numero_caso
+    _selo_do_caso(caso)
 
     def parecer(tr):
         campo("Parecer", f"res_{n}_parecer", padrao=caso.parecer_final, area=True, altura=170, desabilitado=tr,
@@ -1045,6 +1063,11 @@ def _aba_resolucao(caso: Caso) -> None:
     def razoes_canc(tr):
         _checkboxes(caso, "canc", RAZOES_CANCELAMENTO, caso.razoes_cancelamento_selecionadas, tr)
 
+    def anexos(tr):
+        campo("Anexos", f"res_{n}_anexos", padrao=caso.anexos, area=True, altura=130, desabilitado=tr,
+              ph="Informe se você irá anexar algum documento e qual para este caso "
+                 "(apenas a descrição e um anexo por linha).", oculto_rotulo=True)
+
     def diligencia(tr):
         chave = f"res_{n}_diligencia"
         opcoes = [""] + DILIGENCIAS
@@ -1060,8 +1083,11 @@ def _aba_resolucao(caso: Caso) -> None:
     _secao_resolucao(caso, "razoes_clear", "Razões de Clear", "Seleção múltipla — opcional", razoes_clear)
     _secao_resolucao(caso, "razoes_cancelamento", "Razões de Cancelamento", "Seleção múltipla — opcional",
                      razoes_canc)
+    if caso.tipo_caso == TIPO_CRIPTO:
+        _secao_resolucao(caso, "anexos", "Anexos", "Opcional — informe os documentos anexados", anexos)
     _secao_resolucao(caso, "diligencia", "Diligência", "Pendente — definir na calibração do time", diligencia,
                      caixa_pendente="dash")
+    _barra_salvar_resolucao(caso)
 
 
 # -- Avaliação de Qualidade ------------------------------------------------
@@ -1107,19 +1133,6 @@ def _aba_avaliacao(caso: Caso) -> None:
     feedback_atual = ss.get(f"av_{n}_feedback", caso.scorecard_feedback)
 
     with estilo.cartao():
-        # PDF só desta aba, com o que está na tela
-        tmp = Caso.from_dict(caso.to_dict())
-        tmp.scorecard_drivers_marcados = marcados
-        tmp.scorecard_feedback = feedback_atual
-        extra = "|".join(sorted(marcados)) + "||" + feedback_atual
-        pdf = _pdf_cache(n, caso.atualizado_em, "avaliacao", extra, tmp)
-        c1, _ = st.columns([1.4, 1.6])
-        with c1:
-            st.download_button("Baixar versão atualizada em PDF", data=pdf, file_name=f"dossie_{n}_avaliacao.pdf",
-                               mime="application/pdf", key=f"dl_av_{n}")
-        estilo.nota("O PDF gerado aqui inclui apenas o conteúdo desta aba (Avaliação de Qualidade).")
-
-    with estilo.cartao():
         estilo.titulo_secao(f"Avaliação de Qualidade — {rubrica}")
         faixa = faixa_nota(nota)
         st.html('<div class="sx-nota-box"><div class="sx-nota-rot">Nota final</div>'
@@ -1142,6 +1155,19 @@ def _aba_avaliacao(caso: Caso) -> None:
             with estilo.variante("lnk"):
                 st.button("Editar avaliação", key=f"editar_av_{n}", on_click=_reabrir_avaliacao, args=(n,))
 
+    # PDF só desta aba, com o que está na tela; fica no fim da aba, abaixo da avaliação
+    with estilo.cartao():
+        tmp = Caso.from_dict(caso.to_dict())
+        tmp.scorecard_drivers_marcados = marcados
+        tmp.scorecard_feedback = feedback_atual
+        extra = "|".join(sorted(marcados)) + "||" + feedback_atual
+        pdf = _pdf_cache(n, caso.atualizado_em, "avaliacao", extra, tmp)
+        c1, _ = st.columns([1.4, 1.6])
+        with c1:
+            st.download_button("Baixar versão atualizada em PDF", data=pdf, file_name=f"dossie_{n}_avaliacao.pdf",
+                               mime="application/pdf", key=f"dl_av_{n}")
+        estilo.nota("O PDF gerado aqui inclui apenas o conteúdo desta aba (Avaliação de Qualidade).")
+
 
 def _esc(texto: str) -> str:
     from html import escape
@@ -1157,14 +1183,6 @@ def tela_dossie() -> None:
                   on_click=ir_para, args=("banco",))
         return
 
-    topo1, topo2, _ = st.columns([1.8, 2.0, 2.2])
-    with topo1, estilo.variante("topo"):
-        st.button("← Voltar ao Sentinela", key="dossie_voltar_btn", type="primary", on_click=voltar_do_dossie)
-    with topo2, estilo.variante("topo"):
-        pdf = store.carregar_pdf(numero)
-        if pdf:
-            st.download_button("⬇ PDF completo (3 abas)", data=pdf, file_name=f"dossie_{numero}.pdf",
-                               mime="application/pdf", key=f"dl_completo_{numero}")
     st.html(dossie_html.cabecalho_html(caso))
     aba1, aba2, aba3 = st.tabs(["Informações do Caso", "Resolução do Caso", "Avaliação de Qualidade"])
     with aba1:
@@ -1174,6 +1192,15 @@ def tela_dossie() -> None:
         _aba_resolucao(caso)
     with aba3:
         _aba_avaliacao(caso)
+    # Voltar e PDF completo ficam no fim da página, abaixo de qualquer aba
+    fim1, fim2, _ = st.columns([1.8, 2.0, 2.2])
+    with fim1, estilo.variante("topo"):
+        st.button("← Voltar ao Sentinela", key="dossie_voltar_btn", type="primary", on_click=voltar_do_dossie)
+    with fim2, estilo.variante("topo"):
+        pdf = store.carregar_pdf(numero)
+        if pdf:
+            st.download_button("⬇ PDF completo (3 abas)", data=pdf, file_name=f"dossie_{numero}.pdf",
+                               mime="application/pdf", key=f"dl_completo_{numero}")
     st.html(f'<div class="sx-rodape">Sentinela PLD · Dossiê gerado em {_quando(caso.criado_em)} '
             '· Uso interno e confidencial</div>')
 

@@ -188,9 +188,9 @@ class TestGerarDossie(BaseApp):
 
 
 class TestResolucaoEAvaliacao(BaseApp):
-    def caso_gerado(self):
+    def caso_gerado(self, indice_tipo=0):
         at = self.app()
-        self.ir_para_formulario(at, 0)
+        self.ir_para_formulario(at, indice_tipo)
         self.preencher(at, f_nome="João Paulo Carvalho Dias", f_idade="28", f_renda="R$1.200,00")
         self.preencher_bloco3(at)
         self.clicar(at, "gerar_dossie")
@@ -216,6 +216,54 @@ class TestResolucaoEAvaliacao(BaseApp):
         self.assertEqual(self.store.listar_indice()[0]["diligencia"], "Cancelar")
         self.clicar(at, f"reabrir_{n}")
         self.assertFalse(self.store.carregar_caso(n).resolucao_travada())
+
+    def test_botoes_de_salvar_e_pdf_ficam_depois_da_diligencia_em_todos_os_tipos(self):
+        for indice, tipo in ((0, "PF"), (2, "Cripto"), (3, "NuInvest")):
+            with self.subTest(tipo=tipo):
+                at, n = self.caso_gerado(indice)
+                chaves = [b.key for b in at.button]
+                self.assertLess(chaves.index(f"salvar_{n}_diligencia"), chaves.index(f"salvar_caso_{n}"))
+                self.assertLess(chaves.index(f"salvar_{n}_diligencia"), chaves.index(f"dl_res_off_{n}"))
+                # Voltar ao Sentinela fica no fim da página: depois dos botões de salvar/PDF e da avaliação
+                self.assertLess(chaves.index(f"dl_res_off_{n}"), chaves.index("dossie_voltar_btn"))
+                self.assertLess(chaves.index(f"salvar_av_{n}"), chaves.index("dossie_voltar_btn"))
+                self.assertEqual(chaves[-1], "dossie_voltar_btn")
+                # a Diligência é a última seção de resolução
+                secoes = [k.split("_", 2)[2] for k in chaves if k.startswith(f"salvar_{n}_")]
+                self.assertEqual(secoes[-1], "diligencia")
+
+    def test_anexos_so_no_caso_cripto(self):
+        at, n = self.caso_gerado(0)
+        self.assertNotIn(f"res_{n}_anexos", [w.key for w in at.text_area])
+        self.assertNotIn("Anexos", _html(at))
+        at, n = self.caso_gerado(2)
+        self.assertEqual(self.store.carregar_caso(n).tipo_caso, "Cripto")
+        self.assertIn("Anexos", _html(at))
+        campo = at.text_area(key=f"res_{n}_anexos")
+        self.assertIn("Informe se você irá anexar algum documento e qual para este caso "
+                      "(apenas a descrição e um anexo por linha)", campo.placeholder)
+        chaves = [b.key for b in at.button]
+        self.assertLess(chaves.index(f"salvar_{n}_razoes_cancelamento"), chaves.index(f"salvar_{n}_anexos"))
+        self.assertLess(chaves.index(f"salvar_{n}_anexos"), chaves.index(f"salvar_{n}_diligencia"))
+
+    def test_anexos_salvar_travar_editar_e_pdf(self):
+        at, n = self.caso_gerado(2)
+        at.text_area(key=f"res_{n}_anexos").set_value("Extrato da exchange\nComprovante de residência\n\n").run()
+        self.clicar(at, f"salvar_{n}_anexos")
+        c = self.store.carregar_caso(n)
+        self.assertEqual(c.lista_anexos(), ["Extrato da exchange", "Comprovante de residência"])
+        self.assertIn("anexos", c.resolucao_salva_em)
+        self.assertTrue(at.text_area(key=f"res_{n}_anexos").disabled)
+        self.assertIn("2 anexo(s)", _html(at))
+        self.clicar(at, f"editar_{n}_anexos")
+        self.assertNotIn("anexos", self.store.carregar_caso(n).resolucao_salva_em)
+        self.clicar(at, f"salvar_caso_{n}")
+        c = self.store.carregar_caso(n)
+        self.assertTrue(c.resolucao_travada())
+        self.assertEqual(set(c.resolucao_salva_em), {"parecer", "alineas", "jurisprudencias", "razoes_clear",
+                                                     "razoes_cancelamento", "anexos", "diligencia"})
+        self.assertTrue(self.store.carregar_pdf(n).startswith(b"%PDF"))
+
 
     def test_avaliacao_nota_por_categoria_e_persistencia(self):
         at, n = self.caso_gerado()
@@ -382,6 +430,7 @@ class TestIAPerguntasKYC(BaseApp):
             self.clicar(at, "tipo_1")
             self.clicar(at, "modo_auto")
             self.assertIn("Presença Online", _html(at))  # instrução com os dados da PJ
+            self.assertIn("Caso PJ — dados do sócio", _html(at))  # e com os dados do sócio
             at.text_input(key="ia_fator").set_value("Transfer In")
             at.text_area(key="ia_sentenca").set_value("Alerta.")
             at.text_area(key="ia_resumo").set_value("Padaria, dois sócios PEP.")
@@ -400,6 +449,53 @@ class TestIAPerguntasKYC(BaseApp):
             rids = at.session_state["L_so"]
             self.assertEqual(at.text_input(key=f"r_so_{rids[0]}_desc_pep").value, "Vereadora")
             self.assertEqual(at.text_input(key=f"r_so_{rids[1]}_desc_pep").value, "Prefeito")
+
+
+    def test_perguntas_e_mudanca_em_todos_os_tipos_de_caso(self):
+        d = {"kyc": {"nome": "Ana Lima", "idade": "30", "cidadeEstado": "Fortaleza/CE", "nomeEmpresa": "Padaria Estrela"},
+             "movimentacoes": {"periodo": "01/04/2026 até 30/06/2026", "totalCredito": "R$1.000,00",
+                               "totalDebito": "R$900,00",
+                               "contrapartesCredito": [{"tipo": "Pessoa Física", "nome": "João", "porcentagem": "20%",
+                                                        "pep": "Sim"}]}}
+        for indice in range(5):  # PF, PJ, Cripto, NuInvest, Under 18
+            with self.subTest(tipo=indice), mock.patch("ia.extrair_dados_do_texto", return_value=d):
+                at = self.app()
+                self.clicar(at, "home_novo")
+                self.clicar(at, f"tipo_{indice}")
+                self.clicar(at, "modo_auto")
+                at.text_input(key="ia_fator").set_value("Transfer In")
+                at.text_area(key="ia_sentenca").set_value("Alerta.")
+                at.text_area(key="ia_resumo").set_value("Contraparte PEP. Houve mudança de comportamento.")
+                at.run()
+                # a mudança de comportamento pergunta valor e data de abertura/último reporte, em qualquer tipo
+                self.assertEqual(sorted(w.key for w in at.text_input if w.key.startswith("ia_mc_")),
+                                 ["ia_mc_conta", "ia_mc_valor"])
+                at.text_input(key="ia_mc_conta").set_value("10/01/2025")
+                at.text_input(key="ia_data").set_value("15/06/2026")
+                at.run()
+                self.clicar(at, "ia_preencher")
+                self.assertEqual(at.session_state.tela, "preenchimento_ia", at.session_state.ia_erro)
+                self.assertEqual([w.key for w in at.text_input if w.key.startswith("ia_kyc_")],
+                                 ["ia_kyc_cp__cred__0__pep_detalhe"])
+                at.text_input(key="ia_kyc_cp__cred__0__pep_detalhe").set_value("Vereador")
+                at.run()
+                self.clicar(at, "ia_preencher")
+                self.assertEqual(at.session_state.tela, "formulario", at.session_state.ia_erro)
+                self.assertEqual(len(at.text_area(key="f_mudanca").value.splitlines()), 6)
+
+
+    def test_instrucoes_por_tipo_de_caso(self):
+        esperado = {0: [], 1: ["dados da empresa", "dados do sócio"], 2: [], 3: [], 4: ["dados do responsável legal"]}
+        for indice, trechos in esperado.items():
+            at = self.app()
+            self.clicar(at, "home_novo")
+            self.clicar(at, f"tipo_{indice}")
+            self.clicar(at, "modo_auto")
+            html = _html(at)
+            for t in ("dados da empresa", "dados do sócio", "dados do responsável legal"):
+                (self.assertIn if t in trechos else self.assertNotIn)(t, html, f"tipo {indice}: {t}")
+            if indice == 4:
+                self.assertIn("Registro Societário, Histórico de PLD e Histórico de Fraude", html)
 
 
     def test_sem_faltas_vai_direto_ao_formulario(self):

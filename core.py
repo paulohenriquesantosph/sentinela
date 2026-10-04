@@ -43,6 +43,7 @@ from opcoes import (
 TIPOS_CASO = ["Pessoa Física (PF)", "Pessoa Jurídica (PJ)", "Cripto", "NuInvest", "Under 18"]
 TIPO_PJ = "Pessoa Jurídica (PJ)"
 TIPO_UNDER18 = "Under 18"
+TIPO_CRIPTO = "Cripto"
 TIPO_NUINVEST = "NuInvest"
 
 TIPOS_REGIAO_RISCO_1 = [
@@ -59,8 +60,9 @@ TIPOS_OUTRAS_MOV = [
 OPCOES_EVASAO = ["", "Rápida Evasão", "Sem Rápida Evasão"]
 
 # Seções da aba Resolução do Caso (cada uma tem o seu próprio "Salvar").
+# "anexos" só existe nos casos Cripto (ver Caso.secoes_resolucao); a Diligência é sempre a última.
 SECOES_RESOLUCAO = ["parecer", "alineas", "jurisprudencias", "razoes_clear",
-                    "razoes_cancelamento", "diligencia"]
+                    "razoes_cancelamento", "anexos", "diligencia"]
 
 NEUTRO = "Não informado"
 
@@ -348,6 +350,7 @@ class Caso:
     jurisprudencias_selecionadas: List[str] = field(default_factory=list)
     razoes_clear_selecionadas: List[str] = field(default_factory=list)
     razoes_cancelamento_selecionadas: List[str] = field(default_factory=list)
+    anexos: str = ""                  # só Cripto: descrição dos documentos anexados, um por linha
     diligencia: str = ""
     resolucao_salva_em: Dict[str, str] = field(default_factory=dict)  # seção -> timestamp
     resolucao_bloqueada_em: str = ""  # "Salvar informações do caso" (trava a aba inteira)
@@ -374,6 +377,13 @@ class Caso:
 
     def nota_qualidade(self) -> float:
         return calcular_nota_scorecard(self.rubrica(), self.scorecard_drivers_marcados)
+
+    def secoes_resolucao(self) -> List[str]:
+        """Seções da Resolução deste caso: "anexos" só aparece no tipo Cripto."""
+        return [x for x in SECOES_RESOLUCAO if x != "anexos" or self.tipo_caso == TIPO_CRIPTO]
+
+    def lista_anexos(self) -> List[str]:
+        return [l.strip() for l in (self.anexos or "").splitlines() if l.strip()]
 
     def resolucao_travada(self) -> bool:
         return bool(self.resolucao_bloqueada_em)

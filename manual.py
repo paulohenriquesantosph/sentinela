@@ -65,10 +65,13 @@ formulário já preenchido para você revisar. Os campos da tela são:</p>
   <li><b>KYC da empresa (PJ):</b> inclua no Resumo o <b>Nome da Empresa, Data de Abertura, Ramo de
       Atividade, Porte, Faturamento Presumido, Endereço, Fachada e Presença Online</b>. Fachada e Presença
       Online vão para o formulário apenas como <b>Sim</b> ou <b>Não</b> (não há campo de detalhe). Os
-      <b>sócios</b> só entram se você citar (nome, idade, endereço, renda, patrimônio e os Sim/Não de risco),
+      <b>sócios</b>: para cada um, inclua nome, idade, endereço (sem endereço, vale o da empresa), renda
+      presumida, patrimônio e os Sim/Não de risco. Só entram os que você citar,
       exceto quando você disser que mais de um sócio tem o mesmo sinal (ex.: “2 sócios são PEP”): aí o
       Sentinela cria um sócio para cada um.</li>
-  <li><b>Under 18:</b> dados do responsável legal, se o texto falar dele.</li>
+  <li><b>Under 18:</b> inclua no Resumo os dados do <b>responsável legal</b> pelo menor: nome, renda
+      presumida, registro profissional, registro societário, histórico de PLD e histórico de fraude. Eles
+      vão para os campos “Campos adicionais — Caso Under 18” do formulário.</li>
   <li><b>Riscos (Sim/Não e detalhe):</b> região de risco (fronteira, extração mineral/madeira ou outra), PEP
       (titular ou relacionado, com descrição e carência), mídia negativa, histórico de PLD e de fraudes.
       Veja o quadro “Perguntas do KYC” abaixo.</li>
@@ -95,6 +98,12 @@ formulário já preenchido para você revisar. Os campos da tela são:</p>
       Cartão de Crédito/Débito, Empréstimos, Criptomoedas, Investimentos ou Outros.</li>
 </ul>
 
+<p><b>Vale para todos os tipos de caso.</b> Tudo o que está nesta seção (perguntas de KYC, contrapartes,
+fragmentação, fracionamento, arredondamento, localidade, renda, mudança de comportamento) funciona do mesmo
+jeito em PF, PJ, Cripto, NuInvest e Under 18. Só ficam restritos à PJ os dados da empresa titular (nome,
+faturamento e porte do titular) e os sócios; no Under 18, a regra de renda baixa/alta vale também para o
+responsável legal.</p>
+
 <p><b>Como escrever o Resumo para o automático acertar</b></p>
 <ul>
   <li><b>Valores:</b> use números claros: “crédito total de R$ 500.000,00”, “renda de R$ 2.800”.</li>
@@ -120,6 +129,25 @@ formulário já preenchido para você revisar. Os campos da tela são:</p>
       R$ 1.000,00 nos créditos e 54 nos débitos; 20 de R$ 2.000,00 nos créditos e 33 nos débitos; e assim
       por diante. A soma de cada lado nunca passa do total do lado. Se você informar os números, ele usa os
       seus.</li>
+  <li><b>Localidade das contrapartes:</b> “contrapartes da <b>mesma localidade</b>” faz o Sentinela colocar
+      em cada contraparte a <b>mesma cidade/estado do titular</b>. “Localidades diferentes do titular” ou
+      “sem vínculo aparente” coloca <b>outras cidades/estados</b>, criados aleatoriamente.</li>
+  <li><b>Nomes e dados das contrapartes:</b> se você não informar nome, idade, cidade/estado ou data de
+      abertura (PJ), o Sentinela <b>cria valores aleatórios</b>, sempre diferentes entre as contrapartes. Isso
+      vale mesmo sem escrever “aleatório”.</li>
+  <li><b>Renda baixa ou alta</b> (do titular ou das contrapartes, com qualquer termo): renda <b>baixa</b> =
+      valor aleatório entre R$ 1.300 e R$ 3.200 (até cerca de 2 salários mínimos; o salário mínimo de 2026 é
+      R$ 1.621); renda <b>alta</b> = valor aleatório entre R$ 35.000 e R$ 150.000 (acima de 20 salários
+      mínimos, o patamar da classe A no Brasil). Cada contraparte recebe um valor <b>diferente</b>.</li>
+  <li><b>Empresas (PJ):</b> sem o nome da empresa, o Sentinela cria um nome <b>coerente com o ramo de
+      atividade</b>. O <b>faturamento presumido</b> é tratado como <b>anual</b>. Faturamento <b>baixo</b>
+      (até R$ 100 mil): valor aleatório entre R$ 20 mil e R$ 100 mil (MEI ou microempresa). Faturamento
+      <b>elevado</b>: vale o <b>porte que você informar</b>, com valor aleatório dentro da faixa dele:
+      <i>Pequeno Porte</i> de R$ 360 mil a R$ 4,8 milhões; <i>Médio Porte</i> de R$ 4,8 milhões a
+      R$ 300 milhões; <i>Grande Porte</i> acima de R$ 300 milhões. Sem porte informado, usa Médio Porte. Se
+      você informar o valor, o porte é deduzido pela mesma tabela.</li>
+  <li><b>Sócios (PJ):</b> sem nome, idade ou renda presumida, o Sentinela cria valores aleatórios. Sem
+      endereço do sócio, usa o <b>mesmo endereço da empresa</b>.</li>
   <li><b>Termos vagos:</b> “diversas”, “várias” e “muitas” viram um número plausível (ex.: 12), nunca a
       palavra. Prefira dar o número real.</li>
   <li><b>Contrapartes aleatórias:</b> se quiser que o Sentinela crie o que faltar, escreva “aleatório”,
@@ -127,7 +155,8 @@ formulário já preenchido para você revisar. Os campos da tela são:</p>
       cargos <b>respeitando a sua instrução</b>. Exemplo: “diversas pessoas físicas, sem capacidade
       financeira elevada” gera contrapartes com <b>renda presumida baixa</b>, variada e coerente com o
       cargo. Se você não disser as profissões, ele cria <b>cargos aleatórios</b> compatíveis com o perfil.
-      Sem essa autorização, ele não inventa nada.</li>
+      Fora das exceções abaixo (nomes e dados das contrapartes e sócios, renda baixa/alta, localidade e dados da
+      empresa), sem essa autorização ele não inventa nada.</li>
 </ul>
 
 <div class="sx-man-aviso"><b class="t">Perguntas do KYC</b>
@@ -235,15 +264,21 @@ Origem dos recursos: transferências de terceiros via Pix</pre>
 <p>O dossiê tem três abas:</p>
 <ul>
   <li><b>Informações do Caso:</b> tudo o que foi preenchido no formulário.</li>
-  <li><b>Resolução do Caso:</b> parecer final do analista, alíneas específicas e diligência, preenchidos
-      depois da geração.</li>
-  <li><b>Avaliação de Qualidade:</b> avaliação do caso durante a calibração.</li>
+  <li><b>Resolução do Caso:</b> parecer final do analista, alíneas, jurisprudências, razões e diligência,
+      preenchidos depois da geração. Nos casos <b>Cripto</b> há também a seção <b>Anexos</b>: um campo livre
+      onde você informa se vai anexar algum documento e qual (apenas a descrição, <b>um anexo por linha</b>).
+      Ela tem o botão <b>Salvar</b> como as demais e aparece no PDF. Os botões <b>Salvar informações do
+      caso</b> e <b>Baixar versão atualizada em PDF</b> ficam sempre no <b>final da aba</b>, abaixo da
+      Diligência.</li>
+  <li><b>Avaliação de Qualidade:</b> avaliação do caso durante a calibração. O botão <b>Baixar versão
+      atualizada em PDF</b> fica no <b>final da aba</b>, abaixo da avaliação.</li>
 </ul>
 <p>O dossiê traz <b>somente as informações do caso</b>: ele não classifica o risco do caso nem lista fatores
 de risco. A classificação de risco é feita pelo analista na resolução, durante a calibração. Da mesma forma,
 a Timeline de Transferências mostra apenas os valores de créditos e débitos e o gráfico, e os valores
 movimentados mês a mês aparecem sem indicar se houve ou não mudança de comportamento.</p>
-<p>Use <b>PDF completo (3 abas)</b> no topo do dossiê para baixar tudo em um só arquivo.</p>
+<p>Use <b>PDF completo (3 abas)</b> para baixar tudo em um só arquivo. Ele e o botão <b>Voltar ao
+Sentinela</b> ficam no <b>final da página</b> do dossiê, abaixo do conteúdo de qualquer aba.</p>
 
 <h3>7. Encontrar dossiês depois</h3>
 <p>Na home, clique em <b>Banco de dossiês</b> para buscar, abrir ou reabrir casos já gerados.</p>

@@ -106,7 +106,7 @@ def com_resolucao_e_avaliacao(c: Caso) -> Caso:
     ]
     c.razoes_cancelamento_selecionadas = ["Cancelamento de Conta Investimento (NuInvest)"]
     c.diligencia = "Reportar e Cancelar"
-    c.resolucao_salva_em = {k: "2026-10-03T19:07:08" for k in core.SECOES_RESOLUCAO}
+    c.resolucao_salva_em = {k: "2026-10-03T19:07:08" for k in c.secoes_resolucao()}
     c.resolucao_bloqueada_em = "2026-10-03T19:07:08"
     c.scorecard_drivers_marcados = [
         "Foi suprimida informação ou movimentação relevante",
@@ -185,6 +185,20 @@ class TestEscopos(unittest.TestCase):
             self.assertNotIn(proibido, html, f"não deveria constar no dossiê: {proibido!r}")
         self.assertIn("Valores Movimentados por Mês", html)
         self.assertIn("Abril R$160.000,00", html)
+
+    @unittest.skipIf(PdfReader is None, "pypdf ausente")
+    def test_anexos_so_aparecem_no_caso_cripto(self):
+        c = caso_joao()
+        c.tipo_caso = "Cripto"
+        c.anexos = "Extrato da exchange\nComprovante de residência"
+        t = texto_pdf(pdf_dossie.gerar_pdf(c))
+        for trecho in ("Anexos", "Extrato da exchange", "Comprovante de residência"):
+            self.assertIn(trecho, t)
+        c.anexos = ""
+        self.assertIn("Nenhum anexo informado", texto_pdf(pdf_dossie.gerar_pdf(c)))
+        c.tipo_caso = "Pessoa Física (PF)"
+        self.assertNotIn("Nenhum anexo informado", texto_pdf(pdf_dossie.gerar_pdf(c)))
+
 
     @unittest.skipIf(PdfReader is None, "pypdf ausente")
     def test_resolucao_nao_tem_avaliacao(self):

@@ -17,7 +17,7 @@ from unittest import mock
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import ia  # noqa: E402
-from core import Caso, NEUTRO, periodo_padrao  # noqa: E402
+from core import Caso, NEUTRO, Socio, periodo_padrao  # noqa: E402
 
 HOJE = date(2026, 10, 3)
 
@@ -604,6 +604,122 @@ class TestFragmentacaoFracionamentoArredondamento(unittest.TestCase):
         avisos = ia.coerencia_extracao(caso, "")  # créditos: 83.000 <= 100.000; débitos: 54.000 > 50.000
         self.assertEqual(len(avisos), 1)
         self.assertIn("arredondadas de débitos somam R$54.000,00", avisos[0])
+
+
+class TestLocalidadeRendaPorte(unittest.TestCase):
+    def test_detecta_localidade(self):
+        for t in ("contrapartes da mesma localidade do titular", "todas na mesma cidade", "residem na mesma cidade/estado",
+                  "do mesmo estado"):
+            self.assertEqual(ia.localidade_contrapartes(t), "MESMA", t)
+        for t in ("contrapartes de localidades diferentes do titular", "sem vínculo aparente com o cliente",
+                  "cidades diferentes", "estados distintos"):
+            self.assertEqual(ia.localidade_contrapartes(t), "DIFERENTE", t)
+        self.assertEqual(ia.localidade_contrapartes("Cliente com renda baixa."), "")
+
+    def test_mensagem_traz_a_localidade(self):
+        self.assertIn("LOCALIDADE DAS CONTRAPARTES: MESMA", ia.montar_mensagem_usuario("mesma localidade"))
+        self.assertIn("LOCALIDADE DAS CONTRAPARTES: DIFERENTE", ia.montar_mensagem_usuario("sem vínculo aparente"))
+        self.assertIn("LOCALIDADE DAS CONTRAPARTES: NÃO INFORMADA", ia.montar_mensagem_usuario("renda baixa"))
+
+    def _caso(self, cidades, tipo="Pessoa Física (PF)", **kw):
+        d = {"movimentacoes": {"totalCredito": "R$100.000,00", "contrapartesCredito": [
+            {"tipo": "Pessoa Física", "nome": f"C{i}", "porcentagem": "10%", "cidadeEstado": c,
+             "rendaPresumida": "R$2.000,00"} for i, c in enumerate(cidades)]}}
+        caso = ia.aplicar_dados_extraidos(Caso(numero_caso="t", tipo_caso=tipo, **kw), d, HOJE)
+        return caso
+
+    def test_mesma_localidade_usa_a_cidade_do_titular(self):
+        caso = self._caso(["Recife/PE", "", "Manaus/AM"], cidade_estado="Fortaleza/CE")
+        ia.coerencia_extracao(caso, "Contrapartes da mesma localidade.")
+        self.assertEqual({c.cidade_estado for c in caso.contrapartes_credito}, {"Fortaleza/CE"})
+
+    def test_localidade_diferente_avisa_se_igual_ao_titular(self):
+        caso = self._caso(["Fortaleza/CE", "Manaus/AM"], cidade_estado="Fortaleza/CE")
+        avisos = ia.coerencia_extracao(caso, "Contrapartes sem vínculo aparente.")
+        self.assertTrue(any("localidades diferentes" in a and "Fortaleza/CE" in a for a in avisos))
+        self.assertEqual([c.cidade_estado for c in caso.contrapartes_credito], ["Fortaleza/CE", "Manaus/AM"])
+
+    def test_rendas_iguais_entre_contrapartes_avisa(self):
+        caso = self._caso(["A/SP", "B/RJ", "C/MG"])
+        avisos = ia.coerencia_extracao(caso, "renda baixa")
+        self.assertTrue(any("mesma renda presumida (R$2.000,00)" in a for a in avisos))
+
+    def test_endereco_do_socio_igual_ao_da_empresa(self):
+        caso = Caso(numero_caso="t", tipo_caso="Pessoa Jurídica (PJ)", endereco="Rua A, 10 - Recife/PE")
+        caso.socios = [Socio(nome="Ana"), Socio(nome="Beto", endereco="Rua B, 5")]
+        ia.coerencia_extracao(caso, "")
+        self.assertEqual([s.endereco for s in caso.socios], ["Rua A, 10 - Recife/PE", "Rua B, 5"])
+
+    def test_regras_de_aleatoriedade_renda_e_porte_no_prompt(self):
+        for trecho in ("PREENCHIMENTO ALEATÓRIO SEMPRE PERMITIDO", "SEMPRE crie nomes aleatórios",
+                       "mesmo endereço da empresa", "coerente com o ramo de atividade",
+                       "entre R$1.300,00 e R$3.200,00", "salário mínimo 2026 = R$1.621,00",
+                       "entre R$35.000,00 e R$150.000,00", "acima de 20 salários mínimos", "DIFERENTE dos demais",
+                       "MEI até R$81.000,00", "Pequeno Porte (EPP) de R$360.000,01 a R$4.800.000,00",
+                       "Médio Porte de R$4.800.000,01 a R$300.000.000,00", "Grande Porte acima de R$300.000.000,00",
+                       "até R$100.000,00", "entre R$20.000,00 e R$100.000,00", "use Médio Porte"):
+            self.assertIn(trecho, ia.SYSTEM_PROMPT_PJ, trecho)
+        self.assertIn("LOCALIDADE DAS CONTRAPARTES", ia.SYSTEM_PROMPT_PF)
+        self.assertNotIn("deixe nome e demais dados dessas contrapartes em branco", ia.SYSTEM_PROMPT_PF)
+
+
+class TestTodosOsTiposDeCaso(unittest.TestCase):
+    """A inteligência do preenchimento automático vale para PF, PJ, Cripto, NuInvest e Under 18;
+    só o que é do KYC da PJ (sócios, empresa titular) fica restrito à PJ."""
+
+    COMUNS = ("UMA INFORMAÇÃO POR LINHA", "FRAGMENTAÇÃO (linha", "FRACIONAMENTO ENTRE CONTRAPARTES (linha",
+              "ARREDONDAMENTO DIVERSO (linha", "os DOIS comportamentos existem ao mesmo tempo",
+              "PREENCHIMENTO ALEATÓRIO SEMPRE PERMITIDO", "SEMPRE crie nomes aleatórios",
+              "LOCALIDADE DAS CONTRAPARTES", "entre R$1.300,00 e R$3.200,00", "entre R$35.000,00 e R$150.000,00",
+              "DIFERENTE dos demais", "MEI até R$81.000,00", "Médio Porte de R$4.800.000,01 a R$300.000.000,00",
+              "entre R$20.000,00 e R$100.000,00", "CRIE uma entrada por contraparte", "\"pepDetalhe\"",
+              "DIFERENTES entre si")
+    SO_PJ = ("EXCEÇÕES ALEATÓRIAS DA PJ", "TITULAR PJ", "mesmo endereço da empresa")
+    SO_PF = ("rendaPresumida do TITULAR",)
+
+    def test_prompts_de_todos_os_tipos(self):
+        from core import TIPOS_CASO, TIPO_PJ
+        for tipo in TIPOS_CASO:
+            prompt = ia.prompt_para_tipo(tipo)
+            with self.subTest(tipo=tipo):
+                for trecho in self.COMUNS:
+                    self.assertIn(trecho, prompt, trecho)
+                for trecho in self.SO_PJ:
+                    (self.assertIn if tipo == TIPO_PJ else self.assertNotIn)(trecho, prompt, trecho)
+                for trecho in self.SO_PF:
+                    (self.assertNotIn if tipo == TIPO_PJ else self.assertIn)(trecho, prompt, trecho)
+
+    def _dados(self, pj):
+        kyc = {"nomeEmpresa": "Padaria Estrela", "endereco": "Rua A, 10 - Recife/PE"} if pj else {
+            "nome": "Ana Lima", "idade": "30", "cidadeEstado": "Fortaleza/CE"}
+        return {"kyc": kyc, "movimentacoes": {
+            "periodo": "01/04/2026 até 30/06/2026", "totalCredito": "R$100.000,00", "totalDebito": "R$50.000,00",
+            "totalContrapartesCredito": "5",
+            "contrapartesCredito": [
+                {"tipo": "Pessoa Física", "nome": f"C{i}", "porcentagem": "30%", "numTransacoes": "5",
+                 "cidadeEstado": "Manaus/AM", "rendaPresumida": "R$2.000,00", "pep": "Sim"} for i in range(3)]}}
+
+    def test_pipeline_igual_nos_cinco_tipos(self):
+        from core import TIPOS_CASO, TIPO_PJ
+        texto = "Contrapartes da mesma localidade, com fragmentação e alto fracionamento. Houve mudança de comportamento."
+        mud, _ = ia.validar_mudanca("10/01/2025", "15/06/2026")
+        for tipo in TIPOS_CASO:
+            with self.subTest(tipo=tipo), mock.patch("ia.extrair_dados_do_texto",
+                                                      return_value=self._dados(tipo == TIPO_PJ)):
+                caso, avisos = ia.extrair_caso_via_ia(tipo, "Alerta", "15/06/2026", "S", texto, mudanca=mud, hoje=HOJE)
+                txt = " | ".join(avisos)
+                # localidade: em código, nos tipos de pessoa física (na PJ vem da IA, pelo endereço da empresa)
+                cidades = {c.cidade_estado for c in caso.contrapartes_credito}
+                self.assertEqual(cidades, {"Manaus/AM"} if tipo == TIPO_PJ else {"Fortaleza/CE"})
+                # fragmentação, fracionamento e rendas iguais: avisos iguais em todos os tipos
+                self.assertIn("fragmentação, mas o total de contrapartes de crédito é 5", txt)
+                self.assertIn("20% ou mais", txt)
+                self.assertIn("menos de 20 transações", txt)
+                self.assertIn("mesma renda presumida", txt)
+                # perguntas de KYC das contrapartes e mudança de comportamento
+                self.assertEqual(sum(k.startswith("cp__cred__") for k in ia.faltas_kyc(caso)), 3)
+                self.assertEqual(len(caso.comp_mudanca_comportamento.splitlines()), 6)
+                self.assertEqual(caso.comp_data_abertura_ultimo_reporte, "10/01/2025")
 
 
 class TestAplicar(unittest.TestCase):
