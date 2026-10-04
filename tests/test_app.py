@@ -342,6 +342,141 @@ class TestIA(BaseApp):
             self.assertIn("401", at.session_state.ia_erro)
 
 
+class TestTimelineBancariaNoFormulario(BaseApp):
+    def _formulario(self, indice_tipo=0):
+        at = self.app()
+        self.ir_para_formulario(at, indice_tipo)
+        if indice_tipo == 1:  # PJ
+            self.preencher(at, f_empresa="Padaria Estrela Ltda", f_emp_fat="R$80.000,00")
+        else:
+            self.preencher(at, f_nome="Pedro Henrique Lima", f_idade="31", f_renda="R$3.000,00")
+        self.preencher(at, f_periodo="01/04/2026 até 30/06/2026", f_tot_cred="R$500.000,00", f_tot_deb="R$40.000,00",
+                       f_tot_cp_cred="63", f_tot_cp_deb="52")
+        return at
+
+    def test_opcoes_em_todos_os_tipos(self):
+        esperadas = ["—", "Rápida Evasão", "Sem Rápida Evasão", "Só Créditos (Sem Débitos)",
+                     "Só Débitos (Sem Créditos)", "Evasão Parcial (Pequena Parcela nos Débitos)"]
+        for indice in range(5):
+            at = self._formulario(indice)
+            self.assertEqual(at.selectbox(key="f_evasao").options, esperadas, indice)
+
+    def test_modos_desenham_so_o_que_existe(self):
+        casos = (("Só Créditos (Sem Débitos)", 500000, 0), ("Só Débitos (Sem Créditos)", 0, 40000),
+                 ("Evasão Parcial (Pequena Parcela nos Débitos)", 500000, 40000))
+        for modo, esp_c, esp_d in casos:
+            with self.subTest(modo=modo):
+                at = self._formulario()
+                at.selectbox(key="f_evasao").set_value(modo).run()
+                self.clicar(at, "gerar_grafico")
+                tl = at.session_state.timeline
+                self.assertEqual((round(sum(tl["cred"])), round(sum(tl["deb"]))), (esp_c, esp_d))
+                self.clicar(at, "gerar_dossie")
+                caso = self.store.carregar_caso(at.session_state.gerado_numero)
+                self.assertEqual(caso.comp_evasao, modo)
+                self.assertEqual((round(sum(caso.timeline_creditos)), round(sum(caso.timeline_debitos))), (esp_c, esp_d))
+                bloco = _html(at).split("Timeline de Transferências")[1]
+                for proibido in ("Só Créditos", "Só Débitos", "Evasão Parcial"):
+                    self.assertNotIn(proibido, bloco)
+
+    def test_aviso_quando_a_parcela_nao_e_pequena(self):
+        at = self._formulario()
+        self.preencher(at, f_tot_deb="R$400.000,00")
+        at.selectbox(key="f_evasao").set_value("Evasão Parcial (Pequena Parcela nos Débitos)").run()
+        self.assertIn("parcela pequena dos créditos", _html(at))
+
+
+class TestTimelineCriptoNoFormulario(BaseApp):
+    def _formulario(self, indice_tipo):
+        at = self.app()
+        self.ir_para_formulario(at, indice_tipo)
+        self.preencher(at, f_nome="Pedro Henrique Lima", f_idade="31", f_renda="R$3.000,00")
+        self.preencher(at, f_periodo="01/04/2026 até 30/06/2026", f_tot_cred="R$500.000,00", f_tot_deb="R$500.000,00",
+                       f_tot_cp_cred="63", f_tot_cp_deb="52")
+        return at
+
+    def _add_cripto(self, at, info):
+        self.clicar(at, "add_om")
+        rid = at.session_state["L_om"][0]
+        at.selectbox(key=f"r_om_{rid}_tipo").set_value("Criptomoedas")
+        at.text_area(key=f"r_om_{rid}_info").set_value(info).run()
+
+    def test_so_aparece_no_cripto_e_com_montante(self):
+        at = self._formulario(2)  # Cripto
+        self.assertNotIn("f_evasao_cripto", [w.key for w in at.selectbox])
+        self.assertIn("adicione em Outras movimentações", _html(at))
+        self._add_cripto(at, "Enviou R$200.000,00 para exchange")
+        self.assertIn("f_evasao_cripto", [w.key for w in at.selectbox])
+        self.assertEqual(at.selectbox(key="f_evasao_cripto").options,
+                         ["—", "Rápida Evasão", "Sem Rápida Evasão", "Só Créditos (Sem Débitos)",
+                          "Só Débitos (Sem Créditos)"])
+        # PF e NuInvest não têm o campo, mesmo com cripto em Outras movimentações
+        for indice in (0, 3):
+            at2 = self._formulario(indice)
+            self._add_cripto(at2, "Enviou R$200.000,00 para exchange")
+            self.assertNotIn("f_evasao_cripto", [w.key for w in at2.selectbox], indice)
+
+    def test_sem_montante_na_descricao_nao_habilita(self):
+        at = self._formulario(2)
+        self._add_cripto(at, "Enviou para exchange, sem valor")
+        self.assertNotIn("f_evasao_cripto", [w.key for w in at.selectbox])
+
+    def test_gera_grafico_e_o_dossie_guarda_a_serie(self):
+        at = self._formulario(2)
+        self._add_cripto(at, "Enviou R$200.000,00 para exchange")
+        at.selectbox(key="f_evasao_cripto").set_value("Rápida Evasão").run()
+        self.clicar(at, "gerar_grafico_cripto")
+        self.assertEqual(round(sum(at.session_state.timeline_cripto["cred"])), 200000)
+        self.clicar(at, "gerar_dossie")
+        numero = at.session_state.gerado_numero
+        self.assertTrue(numero, at.session_state.erros_form)
+        caso = self.store.carregar_caso(numero)
+        self.assertEqual(caso.comp_evasao_cripto, "Rápida Evasão")
+        self.assertEqual(round(sum(caso.timeline_cripto_creditos)), 200000)
+        self.assertIn("Timeline de Transferências — Criptomoedas", _html(at))
+        self.assertNotIn("Rápida Evasão", _html(at).split("Timeline de Transferências — Criptomoedas")[1])
+
+    def test_modos_de_um_lado_so_desenham_o_lado_escolhido(self):
+        for modo, lado_cheio, lado_vazio in (("Só Créditos (Sem Débitos)", "cred", "deb"),
+                                             ("Só Débitos (Sem Créditos)", "deb", "cred")):
+            with self.subTest(modo=modo):
+                at = self._formulario(2)
+                self._add_cripto(at, "Enviou R$200.000,00 para exchange")
+                at.selectbox(key="f_evasao_cripto").set_value(modo).run()
+                self.clicar(at, "gerar_grafico_cripto")
+                tl = at.session_state.timeline_cripto
+                self.assertEqual(round(sum(tl[lado_cheio])), 200000)
+                self.assertEqual(sum(tl[lado_vazio]), 0)
+                self.clicar(at, "gerar_dossie")
+                caso = self.store.carregar_caso(at.session_state.gerado_numero)
+                self.assertEqual(caso.comp_evasao_cripto, modo)
+                cheio = caso.timeline_cripto_creditos if lado_cheio == "cred" else caso.timeline_cripto_debitos
+                vazio = caso.timeline_cripto_debitos if lado_cheio == "cred" else caso.timeline_cripto_creditos
+                self.assertEqual((round(sum(cheio)), sum(vazio)), (200000, 0))
+                html = _html(at)
+                self.assertNotIn("Só Créditos", html.split("Timeline de Transferências — Criptomoedas")[1])
+                self.assertNotIn("Só Débitos", html.split("Timeline de Transferências — Criptomoedas")[1])
+
+
+    def test_automatico_marca_a_evasao_pelo_texto(self):
+        d = {"kyc": {"nome": "Ana Lima"}, "movimentacoes": {"periodo": "01/04/2026 até 30/06/2026",
+                                                              "totalCredito": "R$1.000,00"},
+             "outrasMovimentacoes": [{"tipo": "Criptomoedas", "info": "Recebeu R$300.000,00 em cripto e enviou em seguida"}]}
+        with mock.patch("ia.extrair_dados_do_texto", return_value=d):
+            at = self.app()
+            self.clicar(at, "home_novo")
+            self.clicar(at, "tipo_2")
+            self.clicar(at, "modo_auto")
+            at.text_input(key="ia_fator").set_value("Transfer In")
+            at.text_area(key="ia_sentenca").set_value("Alerta.")
+            at.text_area(key="ia_resumo").set_value("Cliente cripto.")
+            at.text_area(key="ia_outras").set_value("Cripto: R$300.000,00, enviou em seguida.")
+            at.run()
+            self.clicar(at, "ia_preencher")
+            self.assertEqual(at.session_state.tela, "formulario", at.session_state.ia_erro)
+            self.assertEqual(at.selectbox(key="f_evasao_cripto").value, "Rápida Evasão")
+
+
 class TestIAPerguntasKYC(BaseApp):
     def _dados(self):
         return {"kyc": {"nome": "Ana Lima", "idade": "30", "cidadeEstado": "",
@@ -496,6 +631,32 @@ class TestIAPerguntasKYC(BaseApp):
                 (self.assertIn if t in trechos else self.assertNotIn)(t, html, f"tipo {indice}: {t}")
             if indice == 4:
                 self.assertIn("Registro Societário, Histórico de PLD e Histórico de Fraude", html)
+
+
+    def test_automatico_com_dados_minimos_gera_dossie_sem_marcadores(self):
+        d = {"kyc": {}, "movimentacoes": {"periodo": "01/04/2026 até 30/06/2026", "totalCredito": "R$1.000,00"}}
+        with mock.patch("ia.extrair_dados_do_texto", return_value=d):
+            at = self.app()
+            self.clicar(at, "home_novo")
+            self.clicar(at, "tipo_0")
+            self.clicar(at, "modo_auto")
+            at.text_input(key="ia_fator").set_value("Transfer In")
+            at.text_area(key="ia_sentenca").set_value("Alerta.")
+            at.text_area(key="ia_resumo").set_value("Movimentou R$1.000,00. Preencha apenas o que eu informei.")
+            at.run()
+            self.clicar(at, "ia_preencher")
+            self.assertEqual(at.session_state.tela, "formulario", at.session_state.ia_erro)
+            self.assertEqual(at.text_input(key="f_nome").value, "")  # sem marcador "Não informado"
+            self.assertEqual(at.text_input(key="f_renda").value, "")
+            self.clicar(at, "gerar_dossie")
+            numero = at.session_state.gerado_numero
+            self.assertTrue(numero, at.session_state.erros_form)  # a geração não é barrada por campos em branco
+            caso = self.store.carregar_caso(numero)
+            self.assertEqual((caso.nome_cliente, caso.renda_presumida, caso.mov_total_debito), ("", "", ""))
+            html = _html(at)
+            for proibido in ("Não informado", "Sem nome", "R$ 0,00"):
+                self.assertNotIn(proibido, html)
+            self.assertTrue(self.store.carregar_pdf(numero).startswith(b"%PDF"))
 
 
     def test_sem_faltas_vai_direto_ao_formulario(self):

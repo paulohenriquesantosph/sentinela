@@ -25,6 +25,7 @@ import random
 import re
 import tempfile
 import time
+import unicodedata
 import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass, field, asdict, fields
@@ -57,14 +58,24 @@ TIPOS_OUTRAS_MOV = [
     "Saques", "Boletos", "Gastos Cartão de Crédito", "Gastos Cartão de Débito",
     "Empréstimos", "Criptomoedas", "Investimentos", "Outros",
 ]
-OPCOES_EVASAO = ["", "Rápida Evasão", "Sem Rápida Evasão"]
+# Modos da timeline de transferências (a bancária e a de criptomoedas):
+#  - Rápida Evasão / Sem Rápida Evasão: créditos e débitos (o dinheiro entra e sai nos mesmos dias / em dias alternados);
+#  - SO_CREDITOS: só créditos, sem débitos (valores recebidos, mas não evadidos);
+#  - SO_DEBITOS: só débitos, sem créditos (sem recebimentos: valores que já estavam na conta foram transferidos);
+#  - EVASAO_PARCIAL: recebeu os valores, mas evadiu uma parcela pequena nos débitos (usa o total de créditos E o
+#    total de débitos informados; só existe na timeline bancária, que tem os dois totais).
+SO_CREDITOS = "Só Créditos (Sem Débitos)"
+SO_DEBITOS = "Só Débitos (Sem Créditos)"
+EVASAO_PARCIAL = "Evasão Parcial (Pequena Parcela nos Débitos)"
+CRIPTO_SO_CREDITOS = SO_CREDITOS
+CRIPTO_SO_DEBITOS = SO_DEBITOS
+OPCOES_EVASAO = ["", "Rápida Evasão", "Sem Rápida Evasão", SO_CREDITOS, SO_DEBITOS, EVASAO_PARCIAL]
+OPCOES_EVASAO_CRIPTO = OPCOES_EVASAO[:5]  # cripto tem um montante só, sem "parcela pequena" nos débitos
 
 # Seções da aba Resolução do Caso (cada uma tem o seu próprio "Salvar").
 # "anexos" só existe nos casos Cripto (ver Caso.secoes_resolucao); a Diligência é sempre a última.
 SECOES_RESOLUCAO = ["parecer", "alineas", "jurisprudencias", "razoes_clear",
                     "razoes_cancelamento", "anexos", "diligencia"]
-
-NEUTRO = "Não informado"
 
 NOMES_MESES = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho",
                "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"]
@@ -336,13 +347,18 @@ class Caso:
     arredondamento_itens: List[ItemArredondamento] = field(default_factory=list)
     comp_pix: str = "Não"
     pix_itens: List[MensagemPix] = field(default_factory=list)
-    comp_evasao: str = ""             # "Rápida Evasão" ou "Sem Rápida Evasão"
+    comp_evasao: str = ""             # Rápida/Sem Rápida Evasão, Só Créditos, Só Débitos ou Evasão Parcial
     comp_mudanca_comportamento: str = ""
     comp_data_abertura_ultimo_reporte: str = ""
     # Séries diárias do gráfico (guardadas para o gráfico não mudar a cada abertura)
     timeline_inicio: str = ""         # DD/MM/AAAA do primeiro dia
     timeline_creditos: List[float] = field(default_factory=list)
     timeline_debitos: List[float] = field(default_factory=list)
+    # Timeline de criptomoedas (só casos Cripto): montante das Outras Movimentações do tipo Criptomoedas
+    comp_evasao_cripto: str = ""      # Rápida Evasão, Sem Rápida Evasão, Só Créditos ou Só Débitos
+    timeline_cripto_inicio: str = ""
+    timeline_cripto_creditos: List[float] = field(default_factory=list)
+    timeline_cripto_debitos: List[float] = field(default_factory=list)
 
     # Aba Resolução do Caso
     parecer_final: str = ""
@@ -652,7 +668,21 @@ def gerar_series_timeline(periodo: str, total_credito: float, total_debito: floa
             valores[i] = round(valores[i] + resto, 2)
         return valores
 
-    if evasao == "Rápida Evasão" or dias == 1:
+    if evasao == SO_CREDITOS:  # só créditos: nenhum débito, mesmo que haja total de débitos
+        cred = _normalizar(pesos, total_credito)
+        deb = [0.0] * dias
+    elif evasao == SO_DEBITOS:  # só débitos: nenhum crédito, mesmo que haja total de créditos
+        cred = [0.0] * dias
+        deb = _normalizar(pesos, total_debito)
+    elif evasao == EVASAO_PARCIAL:
+        # recebeu ao longo do período e evadiu uma parcela pequena: os débitos caem em poucos dias, depois do início
+        cred = _normalizar(pesos, total_credito)
+        candidatos = list(range(1, dias)) or [0]
+        qtd = max(1, min(len(candidatos), round(dias * rng.uniform(0.15, 0.35))))
+        dias_deb = set(rng.sample(candidatos, qtd))
+        pd = [(rng.random() ** 2 + 0.05) if i in dias_deb else 0.0 for i in range(dias)]
+        deb = _normalizar(pd, total_debito)
+    elif evasao == "Rápida Evasão" or dias == 1:
         cred = _normalizar(pesos, total_credito)
         deb = _normalizar(pesos, total_debito)
     else:
@@ -689,7 +719,8 @@ def _escala_eixo(valor_max: float) -> Tuple[float, float]:
 
 
 def renderizar_timeline_png(inicio: str, creditos: List[float], debitos: List[float],
-                            largura_pol: float = 8.6, altura_pol: float = 3.3, dpi: int = 130) -> bytes:
+                            largura_pol: float = 8.6, altura_pol: float = 3.3, dpi: int = 130,
+                            titulo: str = "Timeline de Transferências") -> bytes:
     """Gráfico de barras espelhadas (créditos acima, débitos abaixo), no estilo do dossiê."""
     import matplotlib
     matplotlib.use("Agg")
@@ -730,13 +761,79 @@ def renderizar_timeline_png(inicio: str, creditos: List[float], debitos: List[fl
         ax.spines[lado].set_visible(False)
     ax.tick_params(length=0)
     ax.tick_params(axis="x", pad=9)
-    ax.set_title("Timeline de Transferências", fontsize=10.5, family="DejaVu Sans Mono",
+    ax.set_title(titulo, fontsize=10.5, family="DejaVu Sans Mono",
                  fontweight="bold", color="#2A2035", pad=10)
     fig.tight_layout()
     buf = BytesIO()
     fig.savefig(buf, format="png", transparent=True)
     plt.close(fig)
     return buf.getvalue()
+
+
+_RE_VALOR_RS = re.compile(r"R\$\s*(\d{1,3}(?:\.\d{3})+(?:,\d+)?|\d+(?:,\d+)?)(?:\s*(mil|milhao|milhoes|mi|k)\b)?",
+                          re.IGNORECASE)
+_MULT_VALOR = {"mil": 1_000.0, "k": 1_000.0, "mi": 1_000_000.0, "milhao": 1_000_000.0, "milhoes": 1_000_000.0}
+
+
+def extrair_montante(texto: str) -> float:
+    """Montante citado numa descrição livre: o MAIOR valor em R$ do texto (que costuma ser o total, e não
+    as parcelas). Aceita "R$ 120.000,00", "R$120000", "R$120 mil" e "R$ 1,5 milhão"; 0 se não houver."""
+    melhor = 0.0
+    sem_acento = "".join(c for c in unicodedata.normalize("NFD", texto or "") if unicodedata.category(c) != "Mn")
+    for m in _RE_VALOR_RS.finditer(sem_acento):
+        valor = parse_valor_br(m.group(1))
+        melhor = max(melhor, valor * _MULT_VALOR.get((m.group(2) or "").lower(), 1.0))
+    return melhor
+
+
+def montante_cripto(caso: Caso) -> float:
+    """Soma, por movimentação do tipo Criptomoedas em "Outras Movimentações", do montante da descrição."""
+    return round(sum(extrair_montante(m.info) for m in caso.outras_movimentacoes
+                     if m.tipo == "Criptomoedas" and (m.info or "").strip()), 2)
+
+
+def aplicar_timeline_cripto_ao_caso(caso: Caso, rng: Optional[random.Random] = None) -> bool:
+    """Série diária da timeline de criptomoedas: o montante da descrição entra e sai (mesmo racional dos
+    repasses rápidos: com Rápida Evasão o dinheiro entra e sai nos mesmos dias). Só para casos Cripto.
+    Devolve False se faltar a escolha de evasão ou o montante."""
+    montante = montante_cripto(caso)
+    if caso.tipo_caso != TIPO_CRIPTO or not caso.comp_evasao_cripto or montante <= 0:
+        return False
+    caso.timeline_cripto_inicio, caso.timeline_cripto_creditos, caso.timeline_cripto_debitos = (
+        gerar_series_timeline_cripto(caso.mov_periodo, montante, caso.comp_evasao_cripto, rng))
+    return True
+
+
+def gerar_series_timeline_cripto(periodo: str, montante: float, modo: str, rng: Optional[random.Random] = None
+                                 ) -> Tuple[str, List[float], List[float]]:
+    """Séries diárias da timeline de criptomoedas (o montante vale para os dois lados, e os modos de um
+    lado só zeram o outro): Rápida/Sem Rápida Evasão, Só Créditos (Sem Débitos) e Só Débitos (Sem Créditos)."""
+    return gerar_series_timeline(periodo, montante, montante, modo, rng)
+
+
+def lados_da_timeline(modo: str) -> Tuple[bool, bool]:
+    """(mostra créditos, mostra débitos) na timeline: os modos de um lado só escondem o outro lado."""
+    return modo != SO_DEBITOS, modo != SO_CREDITOS
+
+
+def pilula_cripto(caso: Caso) -> Tuple[str, str]:
+    """(rótulo, cor) do valor mostrado acima do gráfico de criptomoedas, conforme o lado que existe."""
+    if caso.comp_evasao_cripto == SO_CREDITOS:
+        return "Créditos (criptomoedas)", "verde"
+    if caso.comp_evasao_cripto == SO_DEBITOS:
+        return "Débitos (criptomoedas)", "vermelho"
+    return "Criptomoedas", "verde"
+
+
+TITULO_TIMELINE_CRIPTO = "Timeline de Transferências — Criptomoedas"
+
+
+def grafico_cripto_do_caso(caso: Caso, **kw) -> Optional[bytes]:
+    """PNG do gráfico de criptomoedas (None se o caso não tiver essa timeline)."""
+    if caso.tipo_caso != TIPO_CRIPTO or not caso.timeline_cripto_creditos:
+        return None
+    return renderizar_timeline_png(caso.timeline_cripto_inicio, caso.timeline_cripto_creditos,
+                                   caso.timeline_cripto_debitos, titulo=TITULO_TIMELINE_CRIPTO, **kw)
 
 
 def grafico_do_caso(caso: Caso, **kw) -> Optional[bytes]:
@@ -850,7 +947,7 @@ class ArmazenamentoLocal:
     def _entrada_indice(caso: Caso) -> Dict[str, Any]:
         return {
             "numero_caso": caso.numero_caso,
-            "nome_cliente": caso.nome_display() or "Sem nome",
+            "nome_cliente": caso.nome_display() or "",
             "tipo_caso": caso.tipo_caso,
             "diligencia": caso.diligencia or "Pendente",
             "criado_em": caso.criado_em,

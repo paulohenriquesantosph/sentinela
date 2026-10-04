@@ -90,7 +90,24 @@ formulário já preenchido para você revisar. Os campos da tela são:</p>
       <li><b>Arredondamento:</b> uma linha por valor de referência (R$ 1.000, R$ 2.000, R$ 5.000...), com a
           quantidade de transações, separando créditos e débitos.</li>
       <li><b>Mensagens Pix:</b> uma linha por grupo de mensagens, com a quantidade e um exemplo da mensagem.</li>
-      <li><b>Timeline de transferências:</b> “Rápida Evasão” ou “Sem Rápida Evasão”, se o texto disser.</li>
+      <li><b>Timeline de transferências</b> (créditos e débitos do caso), conforme o texto disser:
+        <ul>
+          <li><b>Rápida Evasão</b> ou <b>Sem Rápida Evasão</b>;</li>
+          <li><b>Só Créditos (Sem Débitos)</b>: valores recebidos, mas não evadidos. O gráfico mostra só
+              créditos;</li>
+          <li><b>Só Débitos (Sem Créditos)</b>: sem recebimentos; os valores já estavam na conta e foram
+              transferidos. O gráfico mostra só débitos;</li>
+          <li><b>Evasão Parcial (Pequena Parcela nos Débitos)</b>: recebeu os valores, mas evadiu só uma
+              parcela pequena nos débitos. O gráfico usa o <b>total de créditos e o total de débitos</b>
+              informados, com os créditos espalhados no período e os débitos concentrados em poucos dias.</li>
+        </ul></li>
+      <li><b>Timeline de criptomoedas (só casos Cripto):</b> no campo “Outras movimentações”, escreva a
+          movimentação de criptomoedas com o <b>montante em R$</b> e a instrução (por exemplo, “enviou
+          R$ 200.000,00 para uma exchange, com rápida evasão” ou “sem rápida evasão”). O Sentinela marca se
+          houve ou não rápida evasão dos valores de cripto, considerando esse montante. Há também dois modos de
+          um lado só: “<b>só créditos</b> / sem débitos” (valores recebidos, mas não evadidos) e “<b>só débitos</b>
+          / sem créditos” (sem recebimentos: os valores já estavam na conta e foram transferidos). Nesses
+          modos o gráfico mostra apenas as barras do lado que existe.</li>
       <li><b>Mudança de comportamento:</b> veja o quadro “Mudança de comportamento” abaixo.</li>
       <li><b>Data de abertura da conta / último reporte.</b></li>
     </ul></li>
@@ -132,9 +149,35 @@ responsável legal.</p>
   <li><b>Localidade das contrapartes:</b> “contrapartes da <b>mesma localidade</b>” faz o Sentinela colocar
       em cada contraparte a <b>mesma cidade/estado do titular</b>. “Localidades diferentes do titular” ou
       “sem vínculo aparente” coloca <b>outras cidades/estados</b>, criados aleatoriamente.</li>
-  <li><b>Nomes e dados das contrapartes:</b> se você não informar nome, idade, cidade/estado ou data de
-      abertura (PJ), o Sentinela <b>cria valores aleatórios</b>, sempre diferentes entre as contrapartes. Isso
-      vale mesmo sem escrever “aleatório”.</li>
+  <li><b>Quando o Sentinela preenche as contrapartes sozinho:</b> ele só faz o que você pediu, e <b>só
+      preenche o restante</b> (cria contrapartes e completa nome, idade, cidade/estado, renda, registro
+      profissional e número de transações) quando você:
+    <ul>
+      <li>indicar <b>fragmentação</b> ou <b>fracionamento</b>;</li>
+      <li>falar em <b>diversas, muitas ou grande número de contrapartes</b> (ou termos parecidos, ou um
+          número a partir de 6);</li>
+      <li>descrever o <b>perfil das contrapartes</b> (por exemplo, “contrapartes sem renda elevada” ou “da
+          mesma localidade”);</li>
+      <li>pedir expressamente (“preencha as demais”, “pode preencher o restante”, “invente os nomes”).</li>
+    </ul>
+    Nesses casos ele cria de 3 a 5 contrapartes principais por lado, com todos os campos, e o formulário
+    avisa para você revisar.</li>
+  <li><b>Quando você quer só o que pediu:</b> se o número de contrapartes é <b>limitado</b> (de 1 a 5), o
+      Sentinela faz <b>somente o que você pediu</b> e <b>não preenche o resto</b>. Exemplos: “as transações
+      foram pontuais, com apenas uma contraparte de crédito e uma de débito”, “3 contrapartes de crédito e
+      2 de débito”, “uma contraparte só”, “preencha apenas o que eu informei” ou “não preencha o resto”.
+      Cada lado fica com exatamente o número pedido, preenchido só com o que você informou (com uma
+      contraparte, ela leva 100% e o valor total do lado), e o que você não informou fica em branco.
+      Instruções explícitas continuam valendo (por exemplo, “renda baixa” ou “mesma localidade”). Para
+      que ele preencha as demais mesmo com número limitado, escreva “pode preencher o restante”. Cada lado é
+      avaliado separadamente: “12 contrapartes de crédito e apenas uma de débito” preenche o crédito e
+      deixa o débito só com o que você informou. Se você <b>não</b> falar de fragmentação, de muitas
+      contrapartes nem do perfil delas, e não pedir para preencher, o Sentinela também não cria nem completa
+      contrapartes. O que ficar sem dado <b>não é preenchido com “Não informado” nem R$ 0,00</b>: o campo
+      simplesmente <b>não aparece no dossiê</b>.</li>
+  <li><b>Nomes e dados das contrapartes:</b> nos casos em que o Sentinela preenche sozinho (veja acima), se
+      você não informar nome, idade, cidade/estado ou data de abertura (PJ), ele <b>cria valores
+      aleatórios</b>, sempre diferentes entre as contrapartes, mesmo sem você escrever “aleatório”.</li>
   <li><b>Renda baixa ou alta</b> (do titular ou das contrapartes, com qualquer termo): renda <b>baixa</b> =
       valor aleatório entre R$ 1.300 e R$ 3.200 (até cerca de 2 salários mínimos; o salário mínimo de 2026 é
       R$ 1.621); renda <b>alta</b> = valor aleatório entre R$ 35.000 e R$ 150.000 (acima de 20 salários
@@ -208,9 +251,10 @@ de 15 contrapartes. 84 transações em múltiplos de R$ 1.000,00 nos créditos.
 Mudança de comportamento com pico aproximado de R$ 120.000,00.</pre></div>
 
 <div class="sx-man-aviso"><b class="t">Depois de preencher</b>
-O Sentinela completa campos obrigatórios que o texto não informou com “Não informado” (ou R$ 0,00 em
-valores) e mostra avisos no topo do formulário quando algo não bate (por exemplo, porcentagens que somam
-mais de 100%). <b>Revise todos os campos</b> e corrija antes de clicar em Gerar dossiê.</div>
+Campos que o texto não informou ficam <b>em branco</b> (sem “Não informado” nem R$ 0,00) e <b>não aparecem
+no dossiê gerado</b>; no preenchimento automático eles não impedem a geração. O formulário mostra avisos no
+topo quando algo não bate (por exemplo, porcentagens que somam mais de 100%). <b>Revise todos os campos</b>
+e corrija antes de clicar em Gerar dossiê.</div>
 
 <h3>3. Preencher o formulário (manual ou revisão)</h3>
 <p>Campos com <b>*</b> são obrigatórios. O formulário é dividido em blocos:</p>
@@ -224,7 +268,12 @@ mais de 100%). <b>Revise todos os campos</b> e corrija antes de clicar em Gerar 
   <li><b>Bloco 3 — Resumo de movimentações:</b> período analisado, créditos e débitos com suas contrapartes e,
       opcionalmente, <b>Outras movimentações</b> (saques, boletos, cartão, empréstimos, cripto, investimentos).</li>
   <li><b>Bloco 4 — Thundera / AML 360:</b> arredondamento de valores, mensagens Pix, timeline de transferências,
-      mudança de comportamento e data de abertura da conta/último reporte.</li>
+      mudança de comportamento e data de abertura da conta/último reporte. Nos casos <b>Cripto</b>, quando há em Outras
+      movimentações uma linha do tipo <b>Criptomoedas</b> com o montante (R$) na descrição, aparece também
+      o campo <b>Timeline de transferências — Criptomoedas</b> (Rápida Evasão, Sem Rápida Evasão, Só Créditos
+      ou Só Débitos), que gera
+      um gráfico próprio com esse montante e o período do Bloco 3. O dossiê mostra só o valor e o gráfico,
+      sem escrever se houve rápida evasão.</li>
 </ul>
 
 <h3>4. Casos NuInvest, Crypto e outras análises específicas</h3>

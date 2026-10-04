@@ -147,6 +147,129 @@ class TestTimeline(unittest.TestCase):
         self.assertFalse(aplicar_timeline_ao_caso(Caso("1", "Cripto")))
 
 
+class TestTimelineBancariaModos(unittest.TestCase):
+    PER = "01/04/2026 até 30/06/2026"
+
+    def _series(self, modo, cred=500000.0, deb=40000.0, seed=3):
+        return gerar_series_timeline(self.PER, cred, deb, modo, random.Random(seed))
+
+    def test_so_creditos_nao_tem_debitos_mesmo_com_total_de_debitos(self):
+        _, c, d = self._series(core.SO_CREDITOS)
+        self.assertAlmostEqual(sum(c), 500000, places=2)
+        self.assertEqual(sum(d), 0)
+        self.assertEqual(len(c), len(d))
+
+    def test_so_debitos_nao_tem_creditos_mesmo_com_total_de_creditos(self):
+        _, c, d = self._series(core.SO_DEBITOS)
+        self.assertEqual(sum(c), 0)
+        self.assertAlmostEqual(sum(d), 40000, places=2)
+
+    def test_evasao_parcial_usa_os_dois_totais(self):
+        for seed in range(30):
+            _, c, d = self._series(core.EVASAO_PARCIAL, 500000.0, 40000.0, seed)
+            self.assertAlmostEqual(sum(c), 500000, places=2)  # recebeu tudo, ao longo do período
+            self.assertAlmostEqual(sum(d), 40000, places=2)    # evadiu só a parcela pequena
+            dias_c, dias_d = sum(1 for x in c if x), sum(1 for x in d if x)
+            self.assertGreater(dias_c, 80)                      # créditos espalhados
+            self.assertLess(dias_d, dias_c)                     # débitos concentrados em poucos dias
+            self.assertEqual(d[0], 0)                           # nenhum débito antes de receber (1º dia)
+
+    def test_evasao_parcial_com_um_dia_so(self):
+        _, c, d = gerar_series_timeline("15/06/2026 até 15/06/2026", 100.0, 10.0, core.EVASAO_PARCIAL)
+        self.assertEqual((c, d), ([100.0], [10.0]))
+
+    def test_modos_antigos_nao_mudam(self):
+        _, c, d = gerar_series_timeline(self.PER, 1000, 1000, "Rápida Evasão", random.Random(2))
+        self.assertTrue(all(abs(a - b) < 0.02 for a, b in zip(c, d)))
+        _, c, d = gerar_series_timeline(self.PER, 1000, 1000, "Sem Rápida Evasão", random.Random(3))
+        self.assertTrue(all((a == 0 or b == 0) for a, b in zip(c, d)))
+
+    def test_lados_da_timeline(self):
+        self.assertEqual(core.lados_da_timeline(core.SO_CREDITOS), (True, False))
+        self.assertEqual(core.lados_da_timeline(core.SO_DEBITOS), (False, True))
+        for modo in ("", "Rápida Evasão", "Sem Rápida Evasão", core.EVASAO_PARCIAL):
+            self.assertEqual(core.lados_da_timeline(modo), (True, True))
+
+    def test_aplica_ao_caso_e_desenha_o_grafico(self):
+        for modo in core.OPCOES_EVASAO[1:]:
+            c = caso_joao()
+            c.comp_evasao = modo
+            c.mov_total_credito, c.mov_total_debito = "R$500.000,00", "R$40.000,00"
+            self.assertTrue(aplicar_timeline_ao_caso(c, random.Random(1)), modo)
+            self.assertTrue(grafico_do_caso(c).startswith(b"\x89PNG"), modo)
+        c = caso_joao()
+        c.comp_evasao, c.mov_total_credito, c.mov_total_debito = core.SO_CREDITOS, "R$500.000,00", "R$40.000,00"
+        aplicar_timeline_ao_caso(c)
+        self.assertEqual(sum(c.timeline_debitos), 0)
+
+
+class TestTimelineCripto(unittest.TestCase):
+    def _caso(self, tipo="Cripto", evasao="Rápida Evasão", info="Enviou R$200.000,00 para uma exchange"):
+        c = Caso("2026-CRIPTO", tipo)
+        c.mov_periodo = "01/04/2026 até 30/06/2026"
+        c.comp_evasao_cripto = evasao
+        c.outras_movimentacoes = [core.OutraMovimentacao(tipo="Criptomoedas", info=info),
+                                  core.OutraMovimentacao(tipo="Saques", info="R$9.000,00")]
+        return c
+
+    def test_extrair_montante(self):
+        casos = {"Comprou R$ 120.000,00 em 15 transações de R$8.000,00": 120000.0, "R$120 mil": 120000.0,
+                 "R$ 1,5 milhão": 1500000.0, "R$2 milhões": 2000000.0, "R$ 300k": 300000.0, "R$120000": 120000.0,
+                 "sem valor": 0.0, "": 0.0}
+        for texto, esperado in casos.items():
+            self.assertEqual(core.extrair_montante(texto), esperado, texto)
+
+    def test_montante_so_conta_linhas_de_criptomoedas(self):
+        c = self._caso()
+        self.assertEqual(core.montante_cripto(c), 200000.0)  # o saque de R$9.000 não entra
+        c.outras_movimentacoes.append(core.OutraMovimentacao(tipo="Criptomoedas", info="Mais R$50.000,00"))
+        self.assertEqual(core.montante_cripto(c), 250000.0)
+
+    def test_racional_igual_ao_dos_repasses_rapidos(self):
+        c = self._caso(evasao="Rápida Evasão")
+        self.assertTrue(core.aplicar_timeline_cripto_ao_caso(c, random.Random(1)))
+        self.assertEqual(round(sum(c.timeline_cripto_creditos), 2), 200000.0)
+        self.assertEqual(round(sum(c.timeline_cripto_debitos), 2), 200000.0)
+        self.assertEqual(c.timeline_cripto_creditos, c.timeline_cripto_debitos)  # entra e sai nos mesmos dias
+        c = self._caso(evasao="Sem Rápida Evasão")
+        self.assertTrue(core.aplicar_timeline_cripto_ao_caso(c, random.Random(1)))
+        self.assertFalse(any(a and b for a, b in zip(c.timeline_cripto_creditos, c.timeline_cripto_debitos)))
+        self.assertEqual(round(sum(c.timeline_cripto_creditos), 2), 200000.0)
+
+    def test_modos_de_um_lado_so(self):
+        for modo, cheio, vazio in ((core.CRIPTO_SO_CREDITOS, 0, 1), (core.CRIPTO_SO_DEBITOS, 1, 0)):
+            c = self._caso(evasao=modo)
+            self.assertTrue(core.aplicar_timeline_cripto_ao_caso(c, random.Random(4)))
+            series = (c.timeline_cripto_creditos, c.timeline_cripto_debitos)
+            self.assertEqual(round(sum(series[cheio]), 2), 200000.0, modo)
+            self.assertEqual(sum(series[vazio]), 0, modo)
+            self.assertEqual(len(series[0]), len(series[1]))
+            self.assertTrue(core.grafico_cripto_do_caso(c).startswith(b"\x89PNG"))
+
+    def test_opcoes_e_rotulo_do_valor(self):
+        self.assertEqual(core.OPCOES_EVASAO_CRIPTO, ["", "Rápida Evasão", "Sem Rápida Evasão",
+                                                    "Só Créditos (Sem Débitos)", "Só Débitos (Sem Créditos)"])
+        # a timeline bancária tem também a evasão parcial (usa os totais de créditos e de débitos)
+        self.assertEqual(core.OPCOES_EVASAO, core.OPCOES_EVASAO_CRIPTO + ["Evasão Parcial (Pequena Parcela nos Débitos)"])
+        self.assertEqual(core.pilula_cripto(self._caso(evasao=core.CRIPTO_SO_CREDITOS)), ("Créditos (criptomoedas)", "verde"))
+        self.assertEqual(core.pilula_cripto(self._caso(evasao=core.CRIPTO_SO_DEBITOS)), ("Débitos (criptomoedas)", "vermelho"))
+        self.assertEqual(core.pilula_cripto(self._caso(evasao="Rápida Evasão")), ("Criptomoedas", "verde"))
+
+
+    def test_so_para_casos_cripto_e_com_montante(self):
+        for c in (self._caso(tipo="Pessoa Física (PF)"), self._caso(evasao=""), self._caso(info="sem valor")):
+            self.assertFalse(core.aplicar_timeline_cripto_ao_caso(c))
+            self.assertEqual(c.timeline_cripto_creditos, [])
+        self.assertIsNone(core.grafico_cripto_do_caso(self._caso(tipo="Pessoa Física (PF)")))
+
+    def test_grafico_e_persistencia(self):
+        c = self._caso()
+        core.aplicar_timeline_cripto_ao_caso(c, random.Random(2))
+        self.assertTrue(core.grafico_cripto_do_caso(c).startswith(b"\x89PNG"))
+        c2 = Caso.from_dict(json.loads(json.dumps(c.to_dict())))
+        self.assertEqual((c2.comp_evasao_cripto, c2.timeline_cripto_creditos), ("Rápida Evasão", c.timeline_cripto_creditos))
+
+
 class TestValidacao(unittest.TestCase):
     def test_validacao_pf(self):
         faltando = validar_caso(Caso("1", "Pessoa Física (PF)"))

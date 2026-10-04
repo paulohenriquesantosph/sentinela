@@ -19,7 +19,8 @@ from typing import List, Optional, Tuple
 
 import estilo
 from core import (
-    Caso, ContraparteMovimentacao, grafico_do_caso, parse_valor_br,
+    Caso, ContraparteMovimentacao, grafico_do_caso, grafico_cripto_do_caso, montante_cripto, parse_valor_br,
+    TIPO_CRIPTO, TITULO_TIMELINE_CRIPTO, pilula_cripto, lados_da_timeline,
     formatar_brl, percentual_restante, formatar_data_br, parse_data_br,
 )
 
@@ -28,11 +29,18 @@ Par = Tuple[str, str]
 
 def _p(*itens: Par) -> str:
     """Pílulas dos pares (rótulo, valor); pares com valor vazio são omitidos."""
-    return estilo.pilulas([(r, v) for r, v in itens if str(v or "").strip()])
+    ok = [(r, v) for r, v in itens if str(v or "").strip() and str(v).strip() != "—"]
+    return estilo.pilulas(ok) if ok else ""
 
 
 def _sub(texto: str) -> str:
     return f'<div class="sx-subhead">{escape(texto)}</div>'
+
+
+def _secao(titulo: str, *itens: Par) -> str:
+    """Subtítulo + pílulas, mas só se algum campo tiver valor (subtítulo sem campos não aparece)."""
+    pilulas = _p(*itens)
+    return (_sub(titulo) + pilulas) if pilulas else ""
 
 
 def _texto(texto: str) -> str:
@@ -59,13 +67,17 @@ def _pct(v: float) -> str:
 # ---------------------------------------------------------------------------
 
 def cabecalho_html(caso: Caso) -> str:
-    """Cartão do topo: número do caso, nome do cliente e avatar."""
-    avatar = "" if caso.eh_pj() else estilo.avatar_svg(caso.genero)
+    """Cartão do topo: número do caso e, se houver, avatar e nome do cliente."""
+    nome = (caso.nome_display() or "").strip()
+    linha_nome = ""
+    if nome:
+        avatar = "" if caso.eh_pj() else estilo.avatar_svg(caso.genero)
+        linha_nome = f'<div class="sx-dossie-nome">{avatar}<span>{escape(nome)}</span></div>'
     return (
         '<div class="sx-info-card" style="padding:14px 22px 16px;">'
         '<div class="sx-dossie-cab">'
         f'<div class="sx-dossie-num">{escape(caso.numero_caso)}</div>'
-        f'<div class="sx-dossie-nome">{avatar}<span>{escape(caso.nome_display() or "Sem nome")}</span></div>'
+        f'{linha_nome}'
         '</div></div>'
     )
 
@@ -81,7 +93,8 @@ def secao_alerta(caso: Caso) -> str:
         ("Fator gerador/alerta", caso.fator_gerador),
         ("Data do alerta", caso.data_alerta),
     )
-    corpo += _sub("Descrição da Sentença") + _texto(caso.sentenca or "—")
+    if (caso.sentenca or "").strip():
+        corpo += _sub("Descrição da Sentença") + _texto(caso.sentenca)
     return _cartao("1. Alerta / Sentença", corpo)
 
 
@@ -114,16 +127,15 @@ def secao_kyc(caso: Caso) -> str:
     c = caso
     corpo = ""
     if c.eh_pj():
-        corpo += _sub("Informações da Empresa")
-        corpo += _p(("Nome da empresa", c.nome_empresa), ("Data de abertura", c.data_abertura),
-                    ("Ramo de atividade", c.ramo_atividade), ("Porte", c.porte),
-                    ("Faturamento presumido", c.faturamento_presumido), ("Endereço", c.endereco))
+        corpo += _secao("Informações da Empresa",
+                        ("Nome da empresa", c.nome_empresa), ("Data de abertura", c.data_abertura),
+                        ("Ramo de atividade", c.ramo_atividade), ("Porte", c.porte),
+                        ("Faturamento presumido", c.faturamento_presumido), ("Endereço", c.endereco))
         corpo += _p(("Presença online", c.presenca_online or "Não"),
                     ("Fachada da empresa", c.fachada_empresa or "Não"))
         for i, s in enumerate(c.socios, 1):
-            corpo += _sub(f"Sócio {i}")
-            corpo += _p(("Nome", s.nome), ("Idade", s.idade), ("Endereço", s.endereco),
-                        ("Renda presumida", s.renda_presumida), ("Patrimônio", s.patrimonio))
+            corpo += _secao(f"Sócio {i}", ("Nome", s.nome), ("Idade", s.idade), ("Endereço", s.endereco),
+                            ("Renda presumida", s.renda_presumida), ("Patrimônio", s.patrimonio))
             flags: List[Par] = []
             if s.regiao_risco == "Sim":
                 flags.append(("Região de risco", s.tipo_regiao_risco or "Sim"))
@@ -139,24 +151,25 @@ def secao_kyc(caso: Caso) -> str:
                 flags.append(("Mídia negativa", s.midia_negativa_detalhe or "Sim"))
             corpo += _p(*flags)
     else:
-        corpo += _sub("Informações Básicas do Cliente")
-        corpo += _p(("Nome do cliente", c.nome_cliente), ("Idade", c.idade), ("Cidade/Estado", c.cidade_estado))
-        corpo += _sub("Cadastro e Registros")
-        corpo += _p(("Última atualização cadastral", c.ultima_atualizacao_cadastral),
-                    ("Registro profissional", c.registro_profissional),
-                    ("Renda presumida do cliente", c.renda_presumida),
-                    ("Profissão informada pelo cliente", c.profissao_informada))
+        corpo += _secao("Informações Básicas do Cliente", ("Nome do cliente", c.nome_cliente), ("Idade", c.idade),
+                        ("Cidade/Estado", c.cidade_estado))
+        corpo += _secao("Cadastro e Registros", ("Última atualização cadastral", c.ultima_atualizacao_cadastral),
+                        ("Registro profissional", c.registro_profissional),
+                        ("Renda presumida do cliente", c.renda_presumida),
+                        ("Profissão informada pelo cliente", c.profissao_informada))
         if c.registro_societario == "Sim":
-            corpo += _sub("Registro Societário")
-            corpo += _p(("Razão social", c.reg_soc_razao_social), ("Data de abertura", c.reg_soc_data_abertura),
-                        ("Situação cadastral", c.reg_soc_situacao_cadastral), ("Ramo de atividade", c.reg_soc_ramo_atividade))
+            corpo += _secao("Registro Societário", ("Razão social", c.reg_soc_razao_social),
+                            ("Data de abertura", c.reg_soc_data_abertura),
+                            ("Situação cadastral", c.reg_soc_situacao_cadastral),
+                            ("Ramo de atividade", c.reg_soc_ramo_atividade))
         if c.rep_nome:
             corpo += _sub("Responsável Legal")
             corpo += _p(("Nome", c.rep_nome), ("Renda presumida", c.rep_renda_presumida),
                         ("Registro profissional", c.rep_reg_prof), ("Registro societário", c.rep_reg_soc),
                         ("Histórico de PLD", c.rep_hist_pld), ("Histórico de fraude", c.rep_hist_fraude))
     corpo += _flags_kyc(c)
-    corpo += _sub("Outras Informações Relevantes") + _texto(c.outras_info or "—")
+    if (c.outras_info or "").strip():
+        corpo += _sub("Outras Informações Relevantes") + _texto(c.outras_info)
     return _cartao("2. KYC - KNOW YOUR CUSTOMER", corpo)
 
 
@@ -165,7 +178,7 @@ def secao_kyc(caso: Caso) -> str:
 # ---------------------------------------------------------------------------
 
 def _contraparte(cp: ContraparteMovimentacao) -> str:
-    out = _sub(cp.tipo or "Pessoa Física")
+    out = ""
     if cp.tipo == "Pessoa Jurídica":
         out += _p(("Porcentagem", cp.porcentagem), ("Valor", cp.valor), ("Número de transações", cp.num_transacoes),
                   ("Nome", cp.nome), ("Cidade/Estado", cp.cidade_estado), ("Data de abertura", cp.data_abertura),
@@ -184,16 +197,20 @@ def _contraparte(cp: ContraparteMovimentacao) -> str:
                             ("Mídia negativa", cp.midia_negativa, cp.midia_negativa_detalhe)):
         if ativo == "Sim":
             flags.append((rot, det or "Sim"))
-    return out + _p(*flags)
+    out += _p(*flags)
+    # o subtítulo (Pessoa Física/Jurídica) só aparece se a contraparte tiver algum campo
+    return (_sub(cp.tipo or "Pessoa Física") + out) if out else ""
 
 
 def _lado(titulo: str, lista: List[ContraparteMovimentacao], rotulo_lado: str) -> str:
+    blocos = [b for b in (_contraparte(cp) for cp in lista) if b]
+    if not blocos:
+        return ""
     corpo = _sub(titulo)
-    blocos = [_contraparte(cp) for cp in lista]
     # a primeira contraparte já traz o próprio subtítulo "Pessoa Física"
-    corpo += '<hr class="sx-linha-sep"/>'.join(blocos) if blocos else _texto("Nenhuma contraparte descrita.")
+    corpo += '<hr class="sx-linha-sep"/>'.join(blocos)
     resto = percentual_restante(lista)
-    if lista and resto is not None:
+    if lista and resto is not None and resto > 0.05:  # sem "demais contrapartes" não há linha de restante
         corpo += f'<div class="sx-resto">{_pct(resto)} restante é referente às demais contrapartes de {rotulo_lado}</div>'
     return corpo
 
@@ -206,11 +223,12 @@ def secao_movimentacoes(caso: Caso) -> str:
     corpo += _p(("Total de débitos", c.mov_total_debito),
                 ("Total de contrapartes (débito)", c.mov_total_contrapartes_debito))
     corpo += _lado("Contrapartes Principais de Débito", c.contrapartes_debito, "débito")
-    if c.outras_movimentacoes:
+    outras = [m for m in c.outras_movimentacoes if (m.info or "").strip()]
+    if outras:
         corpo += _sub("Outras Movimentações")
-        for i, m in enumerate(c.outras_movimentacoes, 1):
+        for i, m in enumerate(outras, 1):
             corpo += (f'<div class="sx-texto"><b>{i}. {escape(m.tipo)}:</b><br/>'
-                      f'{escape(m.info or "—")}</div>')
+                      f'{escape(m.info)}</div>')
     return _cartao("3. Resumo de Movimentações", corpo)
 
 
@@ -236,13 +254,29 @@ def secao_thundera(caso: Caso, grafico_png: Optional[bytes] = None) -> str:
             corpo += _p((f"{lado} — Quantidade", p.quantidade), (f"{lado} — Mensagem {i}", p.mensagem))
     if c.comp_evasao:
         corpo += _sub("Timeline de Transferências")
-        corpo += ('<div class="sx-pills">'
-                  + estilo.pilula("Créditos", _dinheiro(c.mov_total_credito), "gde verde")
-                  + estilo.pilula("Débitos", _dinheiro(c.mov_total_debito), "gde vermelho") + "</div>")
+        totais = ""
+        ver_c, ver_d = lados_da_timeline(c.comp_evasao)  # só créditos/só débitos escondem o outro lado
+        if ver_c and (c.mov_total_credito or "").strip():
+            totais += estilo.pilula("Créditos", _dinheiro(c.mov_total_credito), "gde verde")
+        if ver_d and (c.mov_total_debito or "").strip():
+            totais += estilo.pilula("Débitos", _dinheiro(c.mov_total_debito), "gde vermelho")
+        if totais:
+            corpo += '<div class="sx-pills">' + totais + "</div>"
         png = grafico_png or grafico_do_caso(c)
         if png:
             b64 = base64.b64encode(png).decode("ascii")
             corpo += f'<div class="sx-grafico"><img alt="Timeline de Transferências" src="data:image/png;base64,{b64}"/></div>'
+    if c.tipo_caso == TIPO_CRIPTO and c.timeline_cripto_creditos:
+        # timeline de criptomoedas: só o montante e o gráfico (sem dizer se houve rápida evasão)
+        corpo += _sub(TITULO_TIMELINE_CRIPTO)
+        rot, cor = pilula_cripto(c)
+        corpo += ('<div class="sx-pills">'
+                  + estilo.pilula(rot, _dinheiro(formatar_brl(montante_cripto(c))), "gde " + cor) + "</div>")
+        png_c = grafico_cripto_do_caso(c)
+        if png_c:
+            b64 = base64.b64encode(png_c).decode("ascii")
+            corpo += (f'<div class="sx-grafico"><img alt="{escape(TITULO_TIMELINE_CRIPTO)}" '
+                      f'src="data:image/png;base64,{b64}"/></div>')
     if c.comp_mudanca_comportamento.strip():
         # só os meses e valores movimentados: o dossiê não afirma se houve mudança de comportamento
         corpo += _sub("Valores Movimentados por Mês")

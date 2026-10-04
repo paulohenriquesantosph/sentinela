@@ -31,11 +31,13 @@ import pdf_dossie
 from core import (
     Caso, Socio, ContraparteMovimentacao, OutraMovimentacao, ItemArredondamento, MensagemPix,
     ArmazenamentoLocal, gerar_numero_caso, aplicar_timeline_ao_caso, gerar_series_timeline,
+    aplicar_timeline_cripto_ao_caso, extrair_montante, montante_cripto, TITULO_TIMELINE_CRIPTO,
     renderizar_timeline_png, calcular_nota_scorecard, listar_drivers_scorecard, faixa_nota,
     formatar_nota, estilo_diligencia, inferir_genero, validar_caso, parse_valor_br,
     agora_iso, formatar_data_br, formatar_brl,
     TIPOS_CASO, TIPO_PJ, TIPO_UNDER18, TIPO_CRIPTO, TIPOS_REGIAO_RISCO_1, TIPOS_PEP, TIPOS_CONTRAPARTE,
-    TIPOS_OUTRAS_MOV, OPCOES_EVASAO,
+    TIPOS_OUTRAS_MOV, OPCOES_EVASAO, OPCOES_EVASAO_CRIPTO, gerar_series_timeline_cripto, pilula_cripto, lados_da_timeline,
+    EVASAO_PARCIAL, SO_CREDITOS, SO_DEBITOS,
 )
 from opcoes import (
     DILIGENCIAS, RAZOES_CLEAR, RAZOES_CANCELAMENTO, JURISPRUDENCIA_NUPAGAMENTOS,
@@ -69,8 +71,10 @@ DEFAULTS: Dict[str, Any] = {
     "ia_avisos": [],
     "ia_erro": "",
     "ia_pendente": None,
+    "origem_ia": False,
     "erros_form": [],
     "timeline": None,
+    "timeline_cripto": None,
     "snapshot": None,
     "_uid": 0,
 }
@@ -96,10 +100,12 @@ def limpar_formulario() -> None:
     for k in _chaves_form():
         del ss[k]
     ss.timeline = None
+    ss.timeline_cripto = None
     ss.snapshot = None
     ss.gerado_numero = None
     ss.ia_avisos = []
     ss.ia_pendente = None
+    ss.origem_ia = False
     ss.erros_form = []
 
 
@@ -204,6 +210,7 @@ CAMPOS: List[tuple] = [
     ("f_tot_cp_cred", "mov_total_contrapartes_credito"), ("f_tot_deb", "mov_total_debito"),
     ("f_tot_cp_deb", "mov_total_contrapartes_debito"),
     ("f_arred", "comp_arredondamento"), ("f_pix", "comp_pix"), ("f_evasao", "comp_evasao"),
+    ("f_evasao_cripto", "comp_evasao_cripto"),
     ("f_mudanca", "comp_mudanca_comportamento"), ("f_data_conta", "comp_data_abertura_ultimo_reporte"),
 ]
 
@@ -400,6 +407,7 @@ def _concluir_ia(caso: Caso, avisos: List[str]) -> None:
     ss.ia_pendente = None
     carregar_caso_no_formulario(caso)
     ss.ia_avisos = avisos
+    ss.origem_ia = True
     ir_para("formulario")
 
 
@@ -597,14 +605,63 @@ def _gerar_grafico() -> None:
 
 
 @st.cache_data(show_spinner=False, max_entries=24)
-def _png_timeline(inicio: str, cred: tuple, deb: tuple) -> bytes:
-    return renderizar_timeline_png(inicio, list(cred), list(deb))
+def _png_timeline(inicio: str, cred: tuple, deb: tuple, titulo: str = "Timeline de Transferências") -> bytes:
+    return renderizar_timeline_png(inicio, list(cred), list(deb), titulo=titulo)
+
+
+def _montante_cripto_form() -> float:
+    """Montante (R$) das linhas de Outras movimentações do tipo Criptomoedas, lido do formulário."""
+    return round(sum(extrair_montante(_txt(_kr("om", r, "info"))) for r in _lista("om")
+                     if _txt(_kr("om", r, "tipo")) == "Criptomoedas"), 2)
+
+
+def _gerar_grafico_cripto() -> None:
+    montante = _montante_cripto_form()
+    if montante <= 0:
+        ss.erros_form = ["Informe o montante (R$) na descrição de Outras movimentações do tipo Criptomoedas "
+                         "antes de gerar o gráfico."]
+        return
+    ss.erros_form = []
+    ini, cred, deb = gerar_series_timeline_cripto(_txt("f_periodo"), montante, _txt("f_evasao_cripto"))
+    ss.timeline_cripto = {"inicio": ini, "cred": cred, "deb": deb,
+                          "sig": (_txt("f_periodo"), montante, _txt("f_evasao_cripto"))}
+
+
+def _bloco_timeline_cripto() -> None:
+    """Timeline de criptomoedas (só casos Cripto): mesmo racional dos repasses rápidos, mas com o montante
+    informado na descrição das Outras movimentações do tipo Criptomoedas."""
+    montante = _montante_cripto_form()
+    if montante <= 0:
+        estilo.nota("Timeline de criptomoedas: para habilitar, adicione em Outras movimentações (Bloco 3) uma "
+                    "linha do tipo Criptomoedas com o montante (R$) na descrição.")
+        return
+    e1, _ = st.columns([1, 2])
+    escolha("Timeline de transferências — Criptomoedas", "f_evasao_cripto", OPCOES_EVASAO_CRIPTO, padrao="",
+            container=e1)
+    if not _txt("f_evasao_cripto"):
+        return
+    estilo.nota("O gráfico é montado com o montante informado na descrição de Outras movimentações "
+                "(Criptomoedas) e o Período preenchido no Bloco 3. \"Só Créditos\" mostra apenas valores recebidos "
+                "(sem débitos) e \"Só Débitos\" apenas valores transferidos (sem créditos).")
+    with estilo.variante("sm"):
+        st.button("+ Gerar/atualizar gráfico (Criptomoedas)", key="gerar_grafico_cripto", type="secondary",
+                  on_click=_gerar_grafico_cripto)
+    tc = ss.timeline_cripto
+    if tc:
+        rot, cor = pilula_cripto(Caso(numero_caso="x", tipo_caso=TIPO_CRIPTO, comp_evasao_cripto=_txt("f_evasao_cripto")))
+        st.html('<div class="sx-pills">'
+                + estilo.pilula(rot, "R$ " + formatar_brl(montante).replace("R$", ""), "gde " + cor)
+                + "</div>")
+        st.image(_png_timeline(tc["inicio"], tuple(tc["cred"]), tuple(tc["deb"]), TITULO_TIMELINE_CRIPTO),
+                 use_column_width=True)
 
 
 def _gerar_dossie(tipo_caso: str) -> None:
     caso = montar_caso_do_formulario(tipo_caso)
     caso.numero_caso = gerar_numero_caso()
-    faltando = validar_caso(caso)
+    # Caso vindo do preenchimento automático: o que não foi informado fica em branco e some do dossiê,
+    # então a geração não é barrada por campos vazios (no preenchimento manual a validação continua).
+    faltando = [] if ss.get("origem_ia") else validar_caso(caso)
     if faltando:
         ss.erros_form = faltando
         ss.gerado_numero = None
@@ -621,6 +678,15 @@ def _gerar_dossie(tipo_caso: str) -> None:
             if caso.timeline_creditos:
                 ss.timeline = {"inicio": caso.timeline_inicio, "cred": caso.timeline_creditos,
                                "deb": caso.timeline_debitos, "sig": sig}
+    if caso.tipo_caso == TIPO_CRIPTO and caso.comp_evasao_cripto:
+        sig_c = (caso.mov_periodo, montante_cripto(caso), caso.comp_evasao_cripto)
+        tc = ss.timeline_cripto
+        if tc and tc.get("sig") == sig_c:
+            caso.timeline_cripto_inicio = tc["inicio"]
+            caso.timeline_cripto_creditos, caso.timeline_cripto_debitos = tc["cred"], tc["deb"]
+        elif aplicar_timeline_cripto_ao_caso(caso):
+            ss.timeline_cripto = {"inicio": caso.timeline_cripto_inicio, "cred": caso.timeline_cripto_creditos,
+                                  "deb": caso.timeline_cripto_debitos, "sig": sig_c}
     caso.scorecard_tipo = caso.rubrica()
     pdf_bytes = pdf_dossie.gerar_pdf(caso, "completo")
     store.salvar_caso(caso, pdf_bytes)
@@ -818,16 +884,25 @@ def tela_formulario() -> None:
         escolha("Timeline de transferências", "f_evasao", OPCOES_EVASAO, padrao="", obrig=True, container=e1)
         if _txt("f_evasao"):
             estilo.nota("O gráfico é montado automaticamente com base no Total de Créditos, Total de Débitos e "
-                        "Período preenchidos no Bloco 3.")
+                        "Período preenchidos no Bloco 3. \"Só Créditos\" mostra apenas créditos (sem débitos); \"Só "
+                        "Débitos\", apenas débitos (sem créditos); \"Evasão Parcial\" usa os dois totais, com os "
+                        "débitos como uma parcela pequena dos créditos.")
+            if (_txt("f_evasao") == EVASAO_PARCIAL
+                    and parse_valor_br(_txt("f_tot_deb")) > 0.3 * parse_valor_br(_txt("f_tot_cred"))):
+                estilo.nota("Atenção: na evasão parcial os débitos devem ser uma parcela pequena dos créditos "
+                            "(até cerca de 30%). Confira os totais do Bloco 3.")
             with estilo.variante("sm"):
                 st.button("+ Gerar/atualizar gráfico", key="gerar_grafico", type="secondary", on_click=_gerar_grafico)
             tl = ss.timeline
             if tl:
+                ver_c, ver_d = lados_da_timeline(_txt("f_evasao"))
                 st.html('<div class="sx-pills">'
-                        + estilo.pilula("Créditos", "R$ " + formatar_brl(parse_valor_br(_txt("f_tot_cred"))).replace("R$", ""), "gde verde")
-                        + estilo.pilula("Débitos", "R$ " + formatar_brl(parse_valor_br(_txt("f_tot_deb"))).replace("R$", ""), "gde vermelho")
+                        + (estilo.pilula("Créditos", "R$ " + formatar_brl(parse_valor_br(_txt("f_tot_cred"))).replace("R$", ""), "gde verde") if ver_c else "")
+                        + (estilo.pilula("Débitos", "R$ " + formatar_brl(parse_valor_br(_txt("f_tot_deb"))).replace("R$", ""), "gde vermelho") if ver_d else "")
                         + "</div>")
                 st.image(_png_timeline(tl["inicio"], tuple(tl["cred"]), tuple(tl["deb"])), use_column_width=True)
+        if tipo_caso == TIPO_CRIPTO:
+            _bloco_timeline_cripto()
         campo("Mudança de comportamento", "f_mudanca", area=True, altura=130)
         campo("Data de abertura da conta/data do último reporte", "f_data_conta", obrig=True)
 
@@ -1250,7 +1325,8 @@ def tela_banco() -> None:
     if resultados:
         with estilo.variante("linhas"):
             for item in resultados:
-                rotulo = (f"{item['numero_caso']}  —  {item.get('nome_cliente', '')}   ·   "
+                nome = (item.get("nome_cliente") or "").strip()
+                rotulo = (f"{item['numero_caso']}  —  {nome}   ·   " if nome else f"{item['numero_caso']}   ·   ") + (
                           f"{str(item.get('tipo_caso', '')).upper()}   "
                           f"·   {item.get('diligencia', 'Pendente')}   ↗")
                 st.button(rotulo, key=f"abrir_{item['numero_caso']}", type="secondary",

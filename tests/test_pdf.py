@@ -200,6 +200,120 @@ class TestEscopos(unittest.TestCase):
         self.assertNotIn("Nenhum anexo informado", texto_pdf(pdf_dossie.gerar_pdf(c)))
 
 
+    def _caso_quase_vazio(self):
+        c = Caso(numero_caso="2026-VAZIO1", tipo_caso="Pessoa Física (PF)")
+        c.fator_gerador, c.data_alerta = "Transfer In", "15/06/2026"
+        c.mov_periodo = "01/04/2026 até 30/06/2026"
+        return c
+
+    def test_html_esconde_campos_vazios(self):
+        import dossie_html
+        c = self._caso_quase_vazio()
+        html = dossie_html.cabecalho_html(c) + "".join(dossie_html.informacoes_html(c))
+        for proibido in ("Sem nome", "Não informado", "R$ 0,00", "R$0,00", "—", "Nenhuma contraparte",
+                         "Descrição da Sentença", "Outras Informações Relevantes", "Outras Movimentações",
+                         "Contrapartes Principais", "Informações Básicas do Cliente", "Cadastro e Registros"):
+            self.assertNotIn(proibido, html, proibido)
+        self.assertIn("Transfer In", html)  # o que foi informado continua aparecendo
+
+    def test_sem_demais_contrapartes_nao_mostra_linha_de_restante(self):
+        import dossie_html
+        c = self._caso_quase_vazio()
+        c.contrapartes_credito = [ContraparteMovimentacao(nome="Ana", porcentagem="100%", valor="R$10,00")]
+        c.contrapartes_debito = [ContraparteMovimentacao(nome="Beto", porcentagem="30%", valor="R$3,00")]
+        html = "".join(dossie_html.informacoes_html(c))
+        self.assertNotIn('<div class="sx-resto">0% restante', html)
+        self.assertNotIn("demais contrapartes de crédito", html)
+        self.assertIn("70% restante é referente às demais contrapartes de débito", html)
+
+
+    def _caso_cripto(self, tipo="Cripto"):
+        import random as _r
+        c = self._caso_quase_vazio()
+        c.tipo_caso = tipo
+        c.comp_evasao_cripto = "Rápida Evasão"
+        c.outras_movimentacoes = [OutraMovimentacao(tipo="Criptomoedas", info="Enviou R$200.000,00 para exchange")]
+        core.aplicar_timeline_cripto_ao_caso(c, _r.Random(3))
+        return c
+
+    def test_html_mostra_timeline_cripto_so_com_valor_e_grafico(self):
+        import dossie_html
+        html = "".join(dossie_html.informacoes_html(self._caso_cripto()))
+        self.assertIn("Timeline de Transferências — Criptomoedas", html)
+        self.assertIn("R$ 200.000,00", html)
+        self.assertIn('alt="Timeline de Transferências — Criptomoedas"', html)
+        self.assertNotIn("Rápida Evasão", html)  # o dossiê não diz se houve ou não rápida evasão
+        for tipo in ("Pessoa Física (PF)", "NuInvest", "Under 18", "Pessoa Jurídica (PJ)"):
+            outro = "".join(dossie_html.informacoes_html(self._caso_cripto(tipo)))
+            self.assertNotIn("Timeline de Transferências — Criptomoedas", outro, tipo)
+            self.assertNotIn("data:image/png", outro, tipo)
+
+    def test_rotulo_do_valor_acompanha_o_lado_sem_dizer_o_modo(self):
+        import dossie_html
+        for modo, rotulo in (("Só Créditos (Sem Débitos)", "Créditos (criptomoedas)"),
+                             ("Só Débitos (Sem Créditos)", "Débitos (criptomoedas)")):
+            c = self._caso_cripto()
+            c.comp_evasao_cripto = modo
+            core.aplicar_timeline_cripto_ao_caso(c)
+            html = "".join(dossie_html.informacoes_html(c))
+            self.assertIn(rotulo, html)
+            self.assertIn("R$ 200.000,00", html)
+            for proibido in ("Só Créditos", "Só Débitos", "Sem Débitos", "Sem Créditos", "Rápida Evasão"):
+                self.assertNotIn(proibido, html, proibido)
+            self.assertTrue(pdf_dossie.gerar_pdf(c).startswith(b"%PDF"))
+
+
+    def _caso_bancario(self, modo):
+        import random as _r
+        c = self._caso_quase_vazio()
+        c.mov_total_credito, c.mov_total_debito = "R$500.000,00", "R$40.000,00"
+        c.comp_evasao = modo
+        core.aplicar_timeline_ao_caso(c, _r.Random(5))
+        return c
+
+    def test_so_o_lado_que_existe_aparece_acima_do_grafico(self):
+        import dossie_html
+        for modo, tem, nao_tem in ((core.SO_CREDITOS, "R$ 500.000,00", "R$ 40.000,00"),
+                                   (core.SO_DEBITOS, "R$ 40.000,00", "R$ 500.000,00")):
+            html = "".join(dossie_html.informacoes_html(self._caso_bancario(modo)))
+            bloco = html.split("Timeline de Transferências", 1)[1]
+            self.assertIn(tem, bloco, modo)
+            self.assertNotIn(nao_tem, bloco, modo)
+            for proibido in ("Só Créditos", "Só Débitos", "Sem Débitos", "Sem Créditos", "Evasão Parcial"):
+                self.assertNotIn(proibido, html, proibido)
+            self.assertTrue(pdf_dossie.gerar_pdf(self._caso_bancario(modo)).startswith(b"%PDF"))
+        for modo in ("Rápida Evasão", core.EVASAO_PARCIAL):  # os dois totais aparecem
+            bloco = "".join(dossie_html.informacoes_html(self._caso_bancario(modo))).split("Timeline de Transferências", 1)[1]
+            self.assertIn("R$ 500.000,00", bloco)
+            self.assertIn("R$ 40.000,00", bloco)
+            self.assertNotIn("Evasão Parcial", bloco)
+
+
+    @unittest.skipIf(PdfReader is None, "pypdf ausente")
+    def test_pdf_mostra_timeline_cripto_so_no_caso_cripto(self):
+        t = texto_pdf(pdf_dossie.gerar_pdf(self._caso_cripto()))
+        self.assertIn("Timeline de Transferências — Criptomoedas", t)
+        self.assertIn("R$200.000,00", t.replace(" ", ""))
+        self.assertNotIn("Rápida Evasão", t)
+        self.assertNotIn("Timeline de Transferências — Criptomoedas", texto_pdf(pdf_dossie.gerar_pdf(self._caso_cripto("NuInvest"))))
+
+
+    @unittest.skipIf(PdfReader is None, "pypdf ausente")
+    def test_pdf_esconde_campos_vazios(self):
+        t = texto_pdf(pdf_dossie.gerar_pdf(self._caso_quase_vazio()))
+        for proibido in ("Sem nome", "Não informado", "R$0,00", "Nenhuma contraparte", "Nenhuma outra movimentação",
+                         "Descrição da Sentença", "Outras Informações Relevantes", "Contrapartes Principais",
+                         "Informações Básicas do Cliente", "Cadastro e Registros"):
+            self.assertNotIn(proibido, t, proibido)
+        self.assertIn("Transfer In", t)
+
+    def test_pdf_com_so_um_total_gera(self):
+        c = self._caso_quase_vazio()
+        c.mov_total_credito = "R$10.000,00"
+        c.comp_evasao = "Rápida Evasão"
+        self.assertTrue(pdf_dossie.gerar_pdf(c).startswith(b"%PDF"))
+
+
     @unittest.skipIf(PdfReader is None, "pypdf ausente")
     def test_resolucao_nao_tem_avaliacao(self):
         t = texto_pdf(self.resolucao)

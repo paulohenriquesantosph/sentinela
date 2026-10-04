@@ -206,11 +206,20 @@ def _pilula(ctx: _Ctx, rotulo: str, valor: str, cor=None) -> Tuple[Table, float]
     return t, w
 
 
+def _bloco(ctx: _Ctx, titulo: str, itens: List[Tuple[str, str]], cores: Optional[dict] = None) -> List[Any]:
+    """Subtítulo + pílulas, mas só se algum campo tiver valor."""
+    if not any((v or "").strip() and (v or "").strip() != "—" for _, v in itens):
+        return []
+    return _subtitulo(ctx, titulo) + _pilulas(ctx, itens, cores)
+
+
 def _pilulas(ctx: _Ctx, itens: List[Tuple[str, str]], cores: Optional[dict] = None) -> List[Any]:
     """Distribui as pílulas em linhas que cabem na largura da página."""
     gap = 5
     linhas: List[List[Tuple[Table, float]]] = [[]]
     uso = 0.0
+    # campos sem valor não aparecem no dossiê
+    itens = [(r, v) for r, v in itens if (v or "").strip() and (v or "").strip() != "—"]
     for rotulo, valor in itens:
         p, w = _pilula(ctx, rotulo, valor, (cores or {}).get(rotulo))
         if linhas[-1] and uso + gap + w > ctx.largura:
@@ -240,7 +249,7 @@ def _pilulas(ctx: _Ctx, itens: List[Tuple[str, str]], cores: Optional[dict] = No
     return out
 
 
-def _texto(ctx: _Ctx, texto: Any, vazio: str = "—", estilo: str = "texto") -> Paragraph:
+def _texto(ctx: _Ctx, texto: Any, vazio: str = "", estilo: str = "texto") -> Paragraph:
     return Paragraph(_t(texto, vazio), ctx.st[estilo])
 
 
@@ -272,7 +281,7 @@ def _cabecalho(ctx: _Ctx, caso) -> List[Any]:
         Paragraph("SENTINELA PLD &mdash; DOSSIÊ", ctx.st["eyebrow"]),
         Spacer(1, 3),
         Paragraph(_t(caso.numero_caso), ctx.st["caso"]),
-        Paragraph(_t(caso.nome_display(), "Sem nome"), ctx.st["nome"]),
+    ] + ([Paragraph(_t(caso.nome_display()), ctx.st["nome"])] if (caso.nome_display() or "").strip() else []) + [
         Paragraph(_t(caso.tipo_caso), ctx.st["texto_peq"]),
     ]
     t = Table([[esquerda]], colWidths=[ctx.largura])
@@ -302,8 +311,9 @@ def _secao_alerta(ctx: _Ctx, caso) -> List[Any]:
         ("Fator gerador/alerta", caso.fator_gerador),
         ("Data do alerta", caso.data_alerta),
     ])
-    out += _subtitulo(ctx, "Descrição da Sentença")
-    out.append(_texto(ctx, caso.sentenca))
+    if (caso.sentenca or "").strip():
+        out += _subtitulo(ctx, "Descrição da Sentença")
+        out.append(_texto(ctx, caso.sentenca))
     return out
 
 
@@ -325,8 +335,7 @@ def _flags_kyc(caso) -> List[Tuple[str, str]]:
 def _secao_kyc(ctx: _Ctx, caso) -> List[Any]:
     out = _titulo_secao(ctx, "2. KYC - Know Your Customer")
     if caso.eh_pj():
-        out += _subtitulo(ctx, "Informações da Empresa")
-        out += _pilulas(ctx, [
+        out += _bloco(ctx, "Informações da Empresa", [
             ("Nome da empresa", caso.nome_empresa), ("Data de abertura", caso.data_abertura),
             ("Ramo de atividade", caso.ramo_atividade), ("Porte", caso.porte),
             ("Faturamento presumido", caso.faturamento_presumido), ("Endereço", caso.endereco),
@@ -334,26 +343,23 @@ def _secao_kyc(ctx: _Ctx, caso) -> List[Any]:
             ("Fachada da empresa", caso.fachada_empresa or "Não"),
         ])
     else:
-        out += _subtitulo(ctx, "Informações Básicas do Cliente")
-        out += _pilulas(ctx, [("Nome do cliente", caso.nome_cliente), ("Idade", caso.idade),
-                              ("Cidade/Estado", caso.cidade_estado)])
-        out += _subtitulo(ctx, "Cadastro e Registros")
-        out += _pilulas(ctx, [
+        out += _bloco(ctx, "Informações Básicas do Cliente", [("Nome do cliente", caso.nome_cliente),
+                                                              ("Idade", caso.idade),
+                                                              ("Cidade/Estado", caso.cidade_estado)])
+        out += _bloco(ctx, "Cadastro e Registros", [
             ("Última atualização cadastral", caso.ultima_atualizacao_cadastral),
             ("Registro profissional", caso.registro_profissional),
             ("Renda presumida do cliente", caso.renda_presumida),
             ("Profissão informada pelo cliente", caso.profissao_informada),
         ])
         if caso.registro_societario == "Sim":
-            out += _subtitulo(ctx, "Registro Societário")
-            out += _pilulas(ctx, [
+            out += _bloco(ctx, "Registro Societário", [
                 ("Razão social", caso.reg_soc_razao_social), ("Data de abertura", caso.reg_soc_data_abertura),
                 ("Situação cadastral", caso.reg_soc_situacao_cadastral),
                 ("Ramo de atividade", caso.reg_soc_ramo_atividade),
             ])
     if caso.tipo_caso == core.TIPO_UNDER18 and (caso.rep_nome or caso.rep_renda_presumida):
-        out += _subtitulo(ctx, "Responsável Legal")
-        out += _pilulas(ctx, [
+        out += _bloco(ctx, "Responsável Legal", [
             ("Nome do responsável legal", caso.rep_nome),
             ("Renda presumida", caso.rep_renda_presumida),
             ("Registro profissional", caso.rep_reg_prof), ("Registro societário", caso.rep_reg_soc),
@@ -379,8 +385,9 @@ def _secao_kyc(ctx: _Ctx, caso) -> List[Any]:
             if s.midia_negativa == "Sim":
                 itens.append(("Mídia negativa", _com_detalhe("Sim", s.midia_negativa_detalhe)))
             out += _pilulas(ctx, itens)
-    out += _subtitulo(ctx, "Outras Informações Relevantes")
-    out.append(_texto(ctx, caso.outras_info))
+    if (caso.outras_info or "").strip():
+        out += _subtitulo(ctx, "Outras Informações Relevantes")
+        out.append(_texto(ctx, caso.outras_info))
     return out
 
 
@@ -395,7 +402,7 @@ def _contraparte(ctx: _Ctx, c) -> List[Any]:
         itens += [("Idade", c.idade), ("Cidade/Estado", c.cidade_estado),
                   ("Renda presumida", c.renda_presumida),
                   ("Registro profissional", c.registro_profissional)]
-    itens = [(r, v) for r, v in itens if (v or "").strip() or r in ("Nome", "Valor")]
+    itens = [(r, v) for r, v in itens if (v or "").strip()]
     if c.registro_societario == "Sim":
         itens.append(("Registro societário", _com_detalhe("Sim", c.registro_societario_detalhe)))
     if c.regiao_risco == "Sim":
@@ -408,6 +415,8 @@ def _contraparte(ctx: _Ctx, c) -> List[Any]:
         itens.append(("Histórico de fraude", _com_detalhe("Sim", c.historico_fraude_detalhe)))
     if c.midia_negativa == "Sim":
         itens.append(("Mídia negativa", _com_detalhe("Sim", c.midia_negativa_detalhe)))
+    if not itens:
+        return []
     bloco = _subtitulo(ctx, c.tipo or "Pessoa Física") + _pilulas(ctx, itens)
     return [KeepTogether(bloco), _linha(LINE, (3, 3), 0.6, 2, 3)]
 
@@ -420,32 +429,30 @@ def _secao_movimentacoes(ctx: _Ctx, caso) -> List[Any]:
     out = _titulo_secao(ctx, "3. Resumo de Movimentações")
     out += _pilulas(ctx, [("Período", caso.mov_periodo), ("Total de créditos", caso.mov_total_credito),
                           ("Total de contrapartes (crédito)", caso.mov_total_contrapartes_credito)])
-    out += _subtitulo(ctx, "Contrapartes Principais de Crédito")
-    if not caso.contrapartes_credito:
-        out.append(_texto(ctx, "", "Nenhuma contraparte principal informada.", "texto_peq"))
+    if caso.contrapartes_credito:
+        out += _subtitulo(ctx, "Contrapartes Principais de Crédito")
     for c in caso.contrapartes_credito:
         out += _contraparte(ctx, c)
     resto = core.percentual_restante(caso.contrapartes_credito)
-    if resto is not None and caso.contrapartes_credito:
+    if resto is not None and caso.contrapartes_credito and resto > 0.05:
         out.append(Paragraph(f"{_fmt_pct(resto)}% restante é referente às demais contrapartes de crédito",
                              ctx.st["texto"]))
         out.append(Spacer(1, 4))
     out += _pilulas(ctx, [("Total de débitos", caso.mov_total_debito),
                           ("Total de contrapartes (débito)", caso.mov_total_contrapartes_debito)])
-    out += _subtitulo(ctx, "Contrapartes Principais de Débito")
-    if not caso.contrapartes_debito:
-        out.append(_texto(ctx, "", "Nenhuma contraparte principal informada.", "texto_peq"))
+    if caso.contrapartes_debito:
+        out += _subtitulo(ctx, "Contrapartes Principais de Débito")
     for c in caso.contrapartes_debito:
         out += _contraparte(ctx, c)
     resto = core.percentual_restante(caso.contrapartes_debito)
-    if resto is not None and caso.contrapartes_debito:
+    if resto is not None and caso.contrapartes_debito and resto > 0.05:
         out.append(Paragraph(f"{_fmt_pct(resto)}% restante é referente às demais contrapartes de débito",
                              ctx.st["texto"]))
-    out += _subtitulo(ctx, "Outras Movimentações")
-    if not caso.outras_movimentacoes:
-        out.append(_texto(ctx, "", "Nenhuma outra movimentação informada.", "texto_peq"))
-    for i, m in enumerate(caso.outras_movimentacoes, 1):
-        out.append(Paragraph(f"<b>{i}. {_t(m.tipo)}:</b><br/>{_t(m.info, '—')}", ctx.st["texto"]))
+    outras = [m for m in caso.outras_movimentacoes if (m.info or "").strip()]
+    if outras:
+        out += _subtitulo(ctx, "Outras Movimentações")
+    for i, m in enumerate(outras, 1):
+        out.append(Paragraph(f"<b>{i}. {_t(m.tipo)}:</b><br/>{_t(m.info)}", ctx.st["texto"]))
         out.append(Spacer(1, 3))
     return out
 
@@ -502,17 +509,47 @@ def _secao_thundera(ctx: _Ctx, caso, grafico_png: Optional[bytes]) -> List[Any]:
         except Exception:  # noqa: BLE001 - gráfico nunca deve derrubar o PDF
             png = None
     if png or caso.comp_evasao:
-        c1, w1 = _cartao_total(ctx, "Créditos", caso.mov_total_credito, VERDE)
-        c2, w2 = _cartao_total(ctx, "Débitos", caso.mov_total_debito, VERMELHO)
-        t = Table([[c1, "", c2]], colWidths=[w1, 6, w2], hAlign="LEFT")
-        t.setStyle(TableStyle([("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0),
-                               ("TOPPADDING", (0, 0), (-1, -1), 0), ("BOTTOMPADDING", (0, 0), (-1, -1), 0)]))
-        tl += [t, Spacer(1, 6)]
+        cartoes: List[Tuple[Table, float]] = []
+        ver_c, ver_d = core.lados_da_timeline(caso.comp_evasao)  # só créditos/só débitos escondem o outro lado
+        if ver_c and (caso.mov_total_credito or "").strip():
+            cartoes.append(_cartao_total(ctx, "Créditos", caso.mov_total_credito, VERDE))
+        if ver_d and (caso.mov_total_debito or "").strip():
+            cartoes.append(_cartao_total(ctx, "Débitos", caso.mov_total_debito, VERMELHO))
+        if cartoes:
+            dados, larguras = [], []
+            for i, (cartao, w) in enumerate(cartoes):
+                if i:
+                    dados.append("")
+                    larguras.append(6)
+                dados.append(cartao)
+                larguras.append(w)
+            t = Table([dados], colWidths=larguras, hAlign="LEFT")
+            t.setStyle(TableStyle([("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                                   ("TOPPADDING", (0, 0), (-1, -1), 0), ("BOTTOMPADDING", (0, 0), (-1, -1), 0)]))
+            tl += [t, Spacer(1, 6)]
     if png:
         img = _imagem_grafico(ctx, png)
         if img:
             tl += [img, Spacer(1, 4)]
     out.append(KeepTogether(tl))  # título, totais e gráfico não se separam entre páginas
+    if caso.tipo_caso == core.TIPO_CRIPTO and caso.timeline_cripto_creditos:
+        # timeline de criptomoedas: só o montante e o gráfico (sem dizer se houve rápida evasão)
+        tc: List[Any] = _subtitulo(ctx, core.TITULO_TIMELINE_CRIPTO)
+        rot, cor = core.pilula_cripto(caso)
+        cartao, w = _cartao_total(ctx, rot, core.formatar_brl(core.montante_cripto(caso)),
+                                  VERMELHO if cor == "vermelho" else VERDE)
+        t = Table([[cartao]], colWidths=[w], hAlign="LEFT")
+        t.setStyle(TableStyle([("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                               ("TOPPADDING", (0, 0), (-1, -1), 0), ("BOTTOMPADDING", (0, 0), (-1, -1), 0)]))
+        tc += [t, Spacer(1, 6)]
+        try:
+            png_c = core.grafico_cripto_do_caso(caso)
+        except Exception:  # noqa: BLE001 - gráfico nunca deve derrubar o PDF
+            png_c = None
+        img_c = _imagem_grafico(ctx, png_c) if png_c else None
+        if img_c:
+            tc += [img_c, Spacer(1, 4)]
+        out.append(KeepTogether(tc))
     if caso.comp_mudanca_comportamento.strip():
         # só os meses e valores movimentados: o dossiê não afirma se houve mudança de comportamento
         out += _subtitulo(ctx, "Valores Movimentados por Mês")
@@ -698,7 +735,7 @@ def gerar_pdf(caso, escopo: str = "completo", grafico_png: Optional[bytes] = Non
 
     gerado = _fmt_ts(caso.criado_em) or datetime.now().strftime("%d/%m/%Y, %H:%M:%S")
     rodape = f"Sentinela PLD · Dossiê gerado em {gerado} · Uso interno e confidencial"
-    topo = f"{caso.numero_caso} · {caso.nome_display() or 'Sem nome'}"
+    topo = f"{caso.numero_caso} · {caso.nome_display()}" if (caso.nome_display() or "").strip() else caso.numero_caso
 
     def _pagina(canvas, doc):
         canvas.saveState()

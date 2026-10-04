@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import json
 import os
+import random
 import re
 import unicodedata
 from datetime import date
@@ -39,10 +40,11 @@ import requests
 
 from core import (
     Caso, ContraparteMovimentacao, OutraMovimentacao, ItemArredondamento,
-    MensagemPix, Socio, NEUTRO, TIPO_PJ, TIPO_UNDER18, TIPOS_REGIAO_RISCO_1,
+    MensagemPix, Socio, TIPO_PJ, TIPO_UNDER18, TIPO_CRIPTO, TIPOS_REGIAO_RISCO_1,
     TIPOS_PEP, TIPOS_OUTRAS_MOV, parse_valor_br, formatar_brl,
     normalizar_valor_texto, parse_periodo, periodo_padrao,
-    gerar_narrativa_mudanca_comportamento, inferir_genero,
+    gerar_narrativa_mudanca_comportamento, inferir_genero, montante_cripto,
+    CRIPTO_SO_CREDITOS, CRIPTO_SO_DEBITOS, EVASAO_PARCIAL,
     gerar_narrativa_mudanca_mensal, pico_mudanca_sugerido, parse_data_br, somar_meses,
 )
 
@@ -80,7 +82,7 @@ _BLOCO_MOVIMENTACOES = (
     '    "arredondamentoItens": [{"credDeb": "Créditos ou Débitos", "quantidade": "84", "valor": "R$1.000,00"}],\n'
     '    "pix": "Sim, Não ou vazio",\n'
     '    "pixItens": [{"credDeb": "Créditos ou Débitos", "quantidade": "12", "mensagem": "exemplo de mensagem Pix"}],\n'
-    '    "evasao": "Rápida Evasão ou Sem Rápida Evasão ou vazio",\n'
+    '    "evasao": "Rápida Evasão, Sem Rápida Evasão, Só Créditos (Sem Débitos), Só Débitos (Sem Créditos), Evasão Parcial (Pequena Parcela nos Débitos) ou vazio",\n'
     '    "mudancaComportamento": {"houve": "Sim ou Não", "valorAproximado": "R$X,00"},\n'
     '    "dataAberturaContaUltimoReporte": "DD/MM/AAAA"\n'
     '  },\n'
@@ -131,7 +133,7 @@ SCHEMA_EXTRACAO_PJ = (
 
 _REGRAS = """
 REGRAS (siga todas):
-1. Preencha SOMENTE o que o texto afirma. Se uma informação não está no texto, use "" (ou [] para listas); não presuma relações, motivações nem conclusões. EXCEÇÃO: se a primeira linha da mensagem do usuário for "INVENÇÃO AUTORIZADA: SIM" (o texto pediu algo como "aleatório", "invente" ou "à sua escolha"), crie valores plausíveis para o que faltar, respeitando as restrições dadas (ex.: "renda baixa", "sem vínculo aparente"). Com "INVENÇÃO AUTORIZADA: NÃO", nunca invente, SALVO nas exceções das regras 20 a 23, que valem sempre.
+1. Preencha SOMENTE o que o texto afirma. Se uma informação não está no texto, use "" (ou [] para listas); não presuma relações, motivações nem conclusões. EXCEÇÃO: se a primeira linha da mensagem do usuário for "INVENÇÃO AUTORIZADA: SIM" (o texto pediu algo como "aleatório", "invente" ou "à sua escolha"), crie valores plausíveis para o que faltar, respeitando as restrições dadas (ex.: "renda baixa", "sem vínculo aparente"). Com "INVENÇÃO AUTORIZADA: NÃO", nunca invente, SALVO nas exceções das regras 20 a 23 e 25, que valem sempre, e só nos lados em que a linha "PREENCHER CONTRAPARTES AUTOMATICAMENTE" disser SIM; com "APENAS O PEDIDO: SIM" vale a regra 27.
 2. Distinga Profissão informada (o que o CLIENTE declarou) de Registro profissional (constatação do ANALISTA sobre a ocupação real). Na dúvida, coloque no registroProfissional.
 3. Muitas contrapartes: informe o total como NÚMERO em totalContrapartesCredito/totalContrapartesDebito e descreva apenas as 3 a 5 principais em cada lista. O restante é calculado pelo dossiê; não crie contrapartes "demais".
 4. Mantenha percentuais e valores coerentes com os totais (valor = porcentagem x total do lado). Sem menção a concentração no texto, NENHUMA contraparte passa de 50% do total; com concentração mencionada, a principal fica acima de 50%. A soma das porcentagens listadas nunca passa de 100%.
@@ -150,11 +152,14 @@ REGRAS (siga todas):
 17. FRACIONAMENTO ENTRE CONTRAPARTES (linha "FRACIONAMENTO ENTRE CONTRAPARTES: SIM"): alto fracionamento = CADA contraparte enviou ou recebeu um ALTO número de transações. Em numTransacoes de TODAS as contrapartes descritas coloque números altos (ex.: entre 30 e 150 cada), em crédito e em débito, com valor médio por transação plausível (valor da contraparte / numTransacoes).
 17b. Se as linhas "FRAGMENTAÇÃO: SIM" e "FRACIONAMENTO ENTRE CONTRAPARTES: SIM" aparecerem JUNTAS, os DOIS comportamentos existem ao mesmo tempo: total alto de contrapartes (regra 16) E alto número de transações em cada contraparte descrita (regra 17).
 18. ARREDONDAMENTO DIVERSO (linha "ARREDONDAMENTO DIVERSO: SIM"): o texto fala em várias transações em valores arredondados/unidades de milhar sem dar os números. Crie VÁRIAS linhas em arredondamentoItens, uma por valor de referência e por lado (Créditos e Débitos), com "arredondamento": "Sim". Ex.: 43 transações de R$1.000,00 nos créditos e 54 nos débitos; 20 de R$2.000,00 nos créditos e 33 nos débitos; 9 de R$5.000,00 nos créditos e 12 nos débitos; e assim sucessivamente (valores de referência crescentes, quantidades altas e geralmente decrescentes). A soma (quantidade x valor) de cada lado nunca passa do total do lado. Se o texto trouxer os números, use os do texto.
-20. PREENCHIMENTO ALEATÓRIO SEMPRE PERMITIDO (exceção à regra 1, mesmo com INVENÇÃO AUTORIZADA: NÃO), em QUALQUER tipo de caso: CONTRAPARTES (PF e PJ). Se o texto não informar nome, idade (PF), cidade/estado ou data de abertura (PJ), INVENTE valores plausíveis e diferentes entre as contrapartes; SEMPRE crie nomes aleatórios quando não houver nome (contraparte PJ: nome coerente com o ramo de atividade). Isso vale para as contrapartes que existem; a quantidade de entradas segue as demais regras.
+20. PREENCHIMENTO ALEATÓRIO DAS CONTRAPARTES, em QUALQUER tipo de caso, SOMENTE por lado em que a linha "PREENCHER CONTRAPARTES AUTOMATICAMENTE" disser SIM (crédito e/ou débito): se o texto não informar nome, idade (PF), cidade/estado ou data de abertura (PJ), INVENTE valores plausíveis e diferentes entre as contrapartes; SEMPRE crie nomes aleatórios quando não houver nome (contraparte PJ: nome coerente com o ramo de atividade). Onde disser NÃO, as contrapartes ficam só com o que o texto informou (campos não informados ficam ""). Se o texto só descreve o perfil das contrapartes (ex.: "contrapartes sem renda elevada") e o montante, aplique também a regra 25 nos lados com SIM.
 21. LOCALIDADE DAS CONTRAPARTES (linha "LOCALIDADE DAS CONTRAPARTES"), em QUALQUER tipo de caso: "MESMA" = todas moram na mesma cidade/estado do titular (use a cidade/estado do titular em cidadeEstado de cada contraparte). "DIFERENTE" (localidades diferentes do titular ou sem vínculo aparente) = cada contraparte em OUTRA cidade/estado, aleatórios e variados, nunca a do titular. Sem a linha, só preencha o que o texto disser.
 22. RENDA PRESUMIDA DAS CONTRAPARTES PF, em QUALQUER tipo de caso: se o texto indicar renda BAIXA (qualquer termo: baixa, modesta, sem capacidade financeira, reduzida etc.), preencha rendaPresumida com um valor aleatório BAIXO, entre R$1.300,00 e R$3.200,00 (até cerca de 2 salários mínimos; salário mínimo 2026 = R$1.621,00). Se indicar renda ALTA (qualquer termo: alta, elevada, alto poder aquisitivo etc.), preencha com um valor aleatório ALTO, entre R$35.000,00 e R$150.000,00 (acima de 20 salários mínimos, o patamar da classe A no Brasil). Cada contraparte recebe um valor DIFERENTE dos demais; nunca repita o mesmo valor em todas.
 23. FATURAMENTO PRESUMIDO E PORTE (empresas): o faturamento presumido é ANUAL e o porte segue a receita bruta anual da regulamentação brasileira (LC 123/2006 e BNDES): MEI até R$81.000,00; Microempresa (ME) até R$360.000,00; Pequeno Porte (EPP) de R$360.000,01 a R$4.800.000,00; Médio Porte de R$4.800.000,01 a R$300.000.000,00; Grande Porte acima de R$300.000.000,00. Aplique às CONTRAPARTES PJ de qualquer tipo de caso. Faturamento BAIXO = até R$100.000,00: valor aleatório entre R$20.000,00 e R$100.000,00 (porte MEI ou Microempresa). Faturamento ELEVADO: use o porte informado e um valor aleatório dentro da faixa dele (Pequeno Porte, Médio Porte ou Grande Porte; Grande entre R$300.000.000,00 e R$2.000.000.000,00); se o porte não vier, use Médio Porte. Se o texto trouxer o valor, use-o e deduza o porte pela tabela.
-24. Saída: APENAS um objeto JSON válido, sem markdown, sem crases e sem texto antes ou depois.
+25. CONTRAPARTES DETALHADAS QUANDO PERMITIDO, em QUALQUER tipo de caso: nos lados em que a linha "PREENCHER CONTRAPARTES AUTOMATICAMENTE" disser SIM (há fragmentação, fracionamento, "muitas/diversas contrapartes", perfil descrito ou pedido explícito) e houver total movimentado, CRIE de 3 a 5 contrapartes principais naquele lado se o texto não as listar, em contrapartesCredito/contrapartesDebito, cada uma com TODOS os campos: tipo (Pessoa Física, salvo se o texto disser empresa), nome, idade, cidadeEstado, rendaPresumida, registroProfissional (cargo), porcentagem, valor (porcentagem x total do lado) e numTransacoes; contraparte PJ: nome, dataAbertura, cidadeEstado, ramoAtividade, porte, faturamentoPresumido, porcentagem, valor e numTransacoes. As porcentagens são diferentes entre si e a soma não passa de 100%. Informe também o total de contrapartes (número). Nos lados com NÃO, NÃO crie contrapartes além das que o texto descreve.
+27. APENAS O PEDIDO (linha "APENAS O PEDIDO: SIM", que prevalece sobre as regras 3, 20 e 25): o analista pediu SÓ o que informou (ex.: "uma contraparte de crédito e uma de débito", "transações pontuais", "preencha apenas..."). Insira SOMENTE o que o texto pediu ou informou e NÃO preencha o resto: campos não informados ficam "" (nada de nomes, idades, cidades, rendas, cargos ou transações aleatórios) e não crie contrapartes, sócios nem dados além dos pedidos. A linha "NÚMERO DE CONTRAPARTES PEDIDO: CRÉDITO N, DÉBITO M" dá a quantidade EXATA por lado (para N = 1: uma entrada, com totalContrapartes igual a 1 e valor igual ao total do lado), preenchidas só com o que o texto trouxe; lado sem número na linha segue o texto. Instruções explícitas continuam valendo (ex.: "renda baixa", "mesma localidade", "nome aleatório"). Só se preenche o restante quando o analista pedir ("preencha as demais", "pode preencher") ou descrever fragmentação, fracionamento ou muitas contrapartes, o que a linha "PREENCHER CONTRAPARTES AUTOMATICAMENTE" já resume.
+28. TIMELINE DE TRANSFERÊNCIAS (campo "evasao" de "thundera", créditos e débitos bancários do caso), em QUALQUER tipo de caso: "Rápida Evasão" (o texto diz que os valores recebidos foram rapidamente evadidos/repassados), "Sem Rápida Evasão" (diz que não houve), "Só Créditos (Sem Débitos)" (os valores foram recebidos, mas NÃO evadidos: só créditos, sem débitos), "Só Débitos (Sem Créditos)" (não houve recebimentos; os valores já estavam na conta e foram transferidos nos débitos), "Evasão Parcial (Pequena Parcela nos Débitos)" (recebeu os valores, mas evadiu apenas uma parcela pequena nos débitos). "" se o texto não disser nada. Nos modos de um lado só e na evasão parcial, mantenha em totalCredito/totalDebito os totais que o texto trouxe.
+29. Saída: APENAS um objeto JSON válido, sem markdown, sem crases e sem texto antes ou depois.
 """
 
 _REGRAS_PJ = """
@@ -173,6 +178,12 @@ REGRAS ESPECÍFICAS DE PESSOA FÍSICA (inclui Cripto, NuInvest e Under 18):
 - Aplique a regra 22 (renda baixa ou alta, com os mesmos valores aleatórios) também à rendaPresumida do TITULAR e, no Under 18, à renda presumida do responsável legal. Na regra 21, a cidade/estado do titular é a cidadeEstado dele.
 """
 
+_REGRAS_CRIPTO = """
+REGRAS ESPECÍFICAS DE CRIPTO:
+- Em "thundera", inclua também "evasaoCripto": "Rápida Evasão", "Sem Rápida Evasão", "Só Créditos (Sem Débitos)", "Só Débitos (Sem Créditos)" ou "". Ela vale SÓ para os valores de criptomoedas informados em "OUTRAS MOVIMENTAÇÕES (NÃO BANCÁRIAS)" (tipo Criptomoedas), com o montante citado na descrição. "Rápida Evasão": a instrução diz que os valores de cripto foram rapidamente movimentados/repassados/evadidos (ex.: "recebeu e enviou em seguida", "rápida evasão", "repasses rápidos"). "Sem Rápida Evasão": diz que não houve (ex.: "sem rápida evasão", "não houve repasse rápido"). "Só Créditos (Sem Débitos)": os valores foram recebidos, mas NÃO evadidos, sem saídas (ex.: "só créditos", "sem débitos", "recebeu e manteve"). "Só Débitos (Sem Créditos)": não houve recebimentos, e os valores, que já estavam na conta, foram transferidos nos débitos (ex.: "só débitos", "sem créditos", "sem recebimentos", "já estavam na conta"). "" quando a instrução não disser nada. Não confunda com "evasao", que é dos créditos e débitos bancários do caso.
+- Em "outrasMovimentacoes", mantenha na "info" da linha de Criptomoedas o montante em R$ que o texto trouxe (ex.: "R$ 200.000,00") e a instrução dada; não invente montante.
+"""
+
 SYSTEM_PROMPT_PF = (
     "Você extrai dados estruturados de um resumo em texto livre de um caso de compliance PLD/AML "
     "(pessoa física) e devolve APENAS um objeto JSON, seguindo EXATAMENTE este formato de campos:\n\n"
@@ -186,8 +197,13 @@ SYSTEM_PROMPT_PJ = (
 )
 
 
+SYSTEM_PROMPT_CRIPTO = SYSTEM_PROMPT_PF + _REGRAS_CRIPTO
+
+
 def prompt_para_tipo(tipo_caso: str) -> str:
-    return SYSTEM_PROMPT_PJ if tipo_caso == TIPO_PJ else SYSTEM_PROMPT_PF
+    if tipo_caso == TIPO_PJ:
+        return SYSTEM_PROMPT_PJ
+    return SYSTEM_PROMPT_CRIPTO if tipo_caso == TIPO_CRIPTO else SYSTEM_PROMPT_PF
 
 
 # ---------------------------------------------------------------------------
@@ -204,9 +220,129 @@ _RE_INVENCAO = re.compile(
 )
 
 
+_RE_NEGA_INVENCAO = re.compile(r"\b(?:nao|sem|nunca)\s+(?:\w+\s+)?(?:invent\w*|cri[ae]\w*|ger[ae]\w*|aleatori\w*)")
+
+
 def autoriza_invencao(texto: str) -> bool:
-    """True se o texto autoriza a IA a criar valores ('aleatório', 'invente', 'à sua escolha'...)."""
-    return bool(_RE_INVENCAO.search(_sem_acento(texto)))
+    """True se o texto autoriza a IA a criar valores ('aleatório', 'invente', 'à sua escolha'...).
+    Negações ("não invente", "sem valores aleatórios") não autorizam."""
+    t = _RE_NEGA_INVENCAO.sub(" ", _sem_acento(texto))
+    return bool(_RE_INVENCAO.search(t))
+
+
+# ---- Quando o Sentinela pode preencher as contrapartes sozinho --------------------------------------
+# Regra do analista: com um número LIMITADO de contrapartes (1 a 5) ou comandos como "preencha só o que informei",
+# só se faz o que foi pedido. O resto só é preenchido quando há fragmentação/fracionamento, "muitas/diversas
+# contrapartes" (ou termos parecidos), perfil descrito para as contrapartes, ou pedido explícito para preencher.
+_NUMEROS = {"um": 1, "uma": 1, "1": 1, "dois": 2, "duas": 2, "2": 2, "tres": 3, "3": 3, "quatro": 4, "4": 4,
+            "cinco": 5, "5": 5}
+_N = r"(um|uma|dois|duas|tres|quatro|cinco|[1-5])"
+_LADO_CRED = r"(?:credito|entrada|recebimento|recebidos?)"
+_LADO_DEB = r"(?:debito|saida|envio|enviados?)"
+_RE_LIM_CRED = re.compile(rf"\b{_N}\s+(?:unic[ao]\s+|so\s+)?contrapartes?\s+(?:de|do|no|na|em)\s+{_LADO_CRED}"
+                          rf"|\b{_N}\s+(?:de|do|no|na)\s+{_LADO_CRED}")
+_RE_LIM_DEB = re.compile(rf"\b{_N}\s+(?:unic[ao]\s+|so\s+)?contrapartes?\s+(?:de|do|no|na|em)\s+{_LADO_DEB}"
+                         rf"|\b{_N}\s+(?:de|do|no|na)\s+{_LADO_DEB}")
+_RE_N_CONTRAPARTES_SO = re.compile(rf"(?:so|apenas|somente|unicamente|exclusivamente)\s+{_N}\s+contrapart")
+_RE_UMA_CONTRAPARTE_QUALIFICADA = re.compile(
+    r"\b(?:um|uma|1)\s+(?:so|unica|unico)\s+contraparte\b|contraparte\s+(?:unica|so)\b|\bunica\s+contraparte"
+    r"|\b(?:so|apenas|somente)\s+(?:uma|um|1)\s+contraparte")
+_RE_UMA_CONTRAPARTE = re.compile(r"\b(?:um|uma|1)\s+contraparte\b")
+_RE_MUITAS = re.compile(
+    r"(?:divers[ao]s?|vari[ao]s|muit[ao]s|grande\s+(?:numero|quantidade|volume)|alto\s+numero|elevad[oa]\s+"
+    r"(?:numero|quantidade)|inumer\w+|dezenas|centenas|multipl[ao]s|numeros[ao]s)\s+(?:de\s+)?contrapart"
+    r"|contrapartes?\s+(?:em\s+)?(?:grande|alto|elevado)\s+(?:numero|quantidade)")
+_RE_MUITAS_N = re.compile(r"\b(?:[6-9]|\d{2,})\s+contrapartes?(?:\s+(?:de|do|no|na)\s+(credito|entrada|debito|saida))?")
+_RE_PONTUAL = re.compile(r"\bpontua(?:l|is)\b|poucas\s+(?:contrapartes|transacoes)|algumas\s+contrapartes|apenas\s+algumas")
+_RE_SO_O_PEDIDO = re.compile(
+    r"\b(?:so|apenas|somente|unicamente|exclusivamente)\s+(?:o|os|a|as)?\s*(?:que\s+(?:eu\s+|ela\s+|ele\s+)?(?:pedi|peco|pedir|informei|informar|disse|falei)|"
+    r"informac\w+|dados|isso|esses|essas|esse|essa)"
+    r"|\bpreench[ae]\w*\s+(?:so|apenas|somente)\b|\b(?:so|apenas|somente)\s+preench\w+"
+    r"|\bnao\s+(?:preench\w+|complet\w+)\s+(?:o\s+|os\s+|as\s+|a\s+)?(?:resto|restante|demais|mais\s+nada|outros|outras|nada)"
+    r"|\bsem\s+(?:preencher|completar)\s+(?:o\s+|os\s+|as\s+|a\s+)?(?:resto|restante|demais)"
+    r"|\bnao\s+(?:invent\w+|complet\w+)\b|\bnada\s+alem\s+d(?:o|isso)")
+_RE_NEGADO = re.compile(r"\b(?:nao|sem|nunca)\s+(?:\w+\s+){0,2}(?:preench\w+|complet\w+|cri\w+|invent\w+|ger\w+)[^.;,\n]*")
+_RE_PERMISSAO = re.compile(
+    r"preench\w+\s+(?:as\s+|os\s+|o\s+)?(?:demais|restante|resto|outr\w+|que\s+falt\w+|campos\s+faltantes|todas?)"
+    r"|\bpode(?:m|s)?\s+(?:preencher|completar|criar|inventar|gerar)"
+    r"|\bcomplet[ae]\w*\s+(?:o\s+|os\s+|as\s+)?(?:resto|restante|demais|campos)"
+    r"|preench\w+\s+automaticamente|fique\s+a\s+vontade")
+
+
+def _limite_lado(t: str, regex: "re.Pattern[str]") -> Optional[int]:
+    m = regex.search(t)
+    if not m:
+        return None
+    return _NUMEROS[next(g for g in m.groups() if g)]
+
+
+def limite_contrapartes(texto: str) -> Dict[str, Optional[int]]:
+    """Quantidade LIMITADA (1 a 5) de contrapartes pedida por lado: {"cred": n|None, "deb": n|None}.
+    "uma contraparte só"/"apenas duas contrapartes" (sem lado) valem para os dois lados."""
+    t = _sem_acento(texto)
+    cred, deb = _limite_lado(t, _RE_LIM_CRED), _limite_lado(t, _RE_LIM_DEB)
+    geral = None
+    m = _RE_N_CONTRAPARTES_SO.search(t)
+    if m:
+        geral = _NUMEROS[m.group(1)]
+    elif _RE_UMA_CONTRAPARTE_QUALIFICADA.search(t):
+        geral = 1
+    elif _RE_UMA_CONTRAPARTE.search(t) and "contrapartes" not in t:
+        geral = 1  # "uma contraparte" sem qualificador só vale se o texto não fala de contrapartes no plural
+    if cred is not None or deb is not None:
+        return {"cred": cred, "deb": deb}  # número dito para um lado não vale para o outro
+    return {"cred": geral, "deb": geral}
+
+
+def contrapartes_pedidas(texto: str) -> Optional[int]:
+    """Número de contrapartes pedido quando é o mesmo nos dois lados (None se não houver limite ou se diferir)."""
+    lim = limite_contrapartes(texto)
+    return lim["cred"] if lim["cred"] is not None and lim["cred"] == lim["deb"] else None
+
+
+def permite_preencher_resto(texto: str) -> bool:
+    """Pedido EXPLÍCITO para preencher as demais contrapartes/campos ("pode preencher o restante",
+    "invente", "aleatório"...). Negações ("não preencha o resto") não contam."""
+    t = _RE_NEGADO.sub(" ", _sem_acento(texto))
+    return bool(_RE_PERMISSAO.search(t)) or autoriza_invencao(texto)
+
+
+def _perfil_nas_contrapartes(texto: str) -> bool:
+    """Há perfil (renda baixa/alta ou localidade) descrito numa frase que fala das contrapartes."""
+    for trecho in re.split(r"[.;\n]", texto or ""):
+        if "contraparte" in _sem_acento(trecho) and (perfil_renda_contrapartes(trecho) or localidade_contrapartes(trecho)):
+            return True
+    return False
+
+
+def politica_contrapartes(texto: str) -> Dict[str, Any]:
+    """Decide, por lado, se o Sentinela pode criar/completar contrapartes sozinho.
+    - "restrito": comandos como "preencha só o que informei" ou "pontuais" (sem pedido explícito de preencher);
+    - "limite": quantidade limitada pedida por lado (1 a 5), que também restringe, salvo pedido explícito;
+    - "livre": por lado, quando há fragmentação, fracionamento, "muitas/diversas contrapartes", perfil das
+      contrapartes ou pedido explícito, e o lado não está restrito."""
+    t = _sem_acento(texto)
+    permissao = permite_preencher_resto(texto)
+    limite = limite_contrapartes(texto)
+    restrito_geral = bool(_RE_SO_O_PEDIDO.search(t) or _RE_PONTUAL.search(t)) and not permissao
+    sinais_gerais = (menciona_fragmentacao(texto) or menciona_fracionamento(texto) or bool(_RE_MUITAS.search(t))
+                     or _perfil_nas_contrapartes(texto) or permissao)
+    muitas_lado = {"cred": False, "deb": False}
+    for m in _RE_MUITAS_N.finditer(t):
+        lado = m.group(1)
+        for k in (("cred",) if lado in ("credito", "entrada") else ("deb",) if lado else ("cred", "deb")):
+            muitas_lado[k] = True
+    livre = {}
+    for k in ("cred", "deb"):
+        limitado = limite[k] is not None and not permissao
+        livre[k] = (not restrito_geral) and (not limitado) and (sinais_gerais or muitas_lado[k])
+    return {"restrito": restrito_geral or any(limite[k] is not None and not permissao for k in limite),
+            "restrito_geral": restrito_geral, "limite": limite, "livre": livre, "permissao": permissao}
+
+
+def restringe_ao_pedido(texto: str) -> bool:
+    """True se o analista pediu para inserir SÓ o que informou (limite de contrapartes ou "preencha só...")."""
+    return bool(politica_contrapartes(texto)["restrito"])
 
 
 _RE_MUDANCA = re.compile(r"(?:mudanca|mudou|alteracao|alterou)\s+(?:de\s+|o\s+|do\s+|no\s+)?(?:seu\s+)?comportament")
@@ -278,6 +414,210 @@ def localidade_contrapartes(texto: str) -> str:
     return ""
 
 
+_RE_RENDA_BAIXA = re.compile(r"sem\s+(?:renda|capacidade\s+financeira)\s+(?:alta|elevada)|sem\s+capacidade"
+                             r"|renda\s+(?:baixa|modesta|reduzida|pequena)|baixa\s+renda|baixo\s+poder"
+                             r"|capacidade\s+financeira\s+(?:baixa|reduzida|limitada)|renda\s+inferior")
+_RE_RENDA_ALTA = re.compile(r"renda\s+(?:alta|elevada)|alta\s+renda|alto\s+poder|capacidade\s+financeira\s+(?:alta|elevada)")
+
+
+def perfil_renda_contrapartes(texto: str) -> str:
+    """'BAIXA', 'ALTA' ou '' conforme o perfil de renda citado no texto (negações como "sem renda
+    elevada" contam como BAIXA)."""
+    t = _sem_acento(texto)
+    if _RE_RENDA_BAIXA.search(t):
+        return "BAIXA"
+    if _RE_RENDA_ALTA.search(t):
+        return "ALTA"
+    return ""
+
+
+_NOMES = ["Marcos", "Fernanda", "Rafael", "Camila", "Anderson", "Juliana", "Thiago", "Patrícia", "Lucas", "Aline",
+          "Rodrigo", "Vanessa", "Bruno", "Daniela", "Felipe", "Luciana", "Gustavo", "Renata", "Diego", "Priscila"]
+_SOBRENOMES = ["Andrade", "Lopes", "Ribeiro", "Souza", "Teixeira", "Pires", "Moura", "Carvalho", "Nunes", "Rocha",
+               "Almeida", "Barbosa", "Cardoso", "Dias", "Freitas", "Gomes", "Martins", "Oliveira", "Pereira", "Silva"]
+_CIDADES = ["São Paulo/SP", "Belo Horizonte/MG", "Recife/PE", "Salvador/BA", "Curitiba/PR", "Porto Alegre/RS",
+            "Fortaleza/CE", "Goiânia/GO", "Manaus/AM", "Campinas/SP", "Betim/MG", "Niterói/RJ", "Londrina/PR",
+            "Joinville/SC", "Vitória/ES", "Natal/RN"]
+_CARGOS = {
+    "BAIXA": ["Auxiliar de limpeza", "Vendedor", "Atendente de lanchonete", "Motoboy", "Porteiro", "Diarista",
+              "Repositor de mercadorias", "Ajudante geral", "Cozinheira", "Entregador"],
+    "": ["Analista administrativo", "Técnico em informática", "Professor", "Vendedor externo", "Contador",
+         "Enfermeiro", "Motorista de aplicativo", "Assistente financeiro"],
+    "ALTA": ["Médico", "Advogado", "Engenheiro civil", "Empresário", "Diretor comercial", "Dentista",
+             "Arquiteto", "Gerente de contas corporativas"],
+}
+_RAMOS = ["Comércio varejista", "Transporte de cargas", "Serviços de limpeza", "Alimentação", "Construção civil",
+          "Tecnologia da informação", "Consultoria empresarial"]
+_SUFIXOS_EMPRESA = ["Comércio Ltda", "Serviços Ltda", "Participações Ltda", "Distribuidora Ltda", "& Cia Ltda"]
+
+
+def _renda_aleatoria(perfil: str, rng: random.Random, usadas: set) -> str:
+    for _ in range(50):
+        if perfil == "BAIXA":
+            v = rng.randint(13, 32) * 100
+        elif perfil == "ALTA":
+            v = rng.randint(35, 150) * 1000
+        else:
+            v = rng.randint(35, 95) * 100
+        if v not in usadas:
+            break
+    usadas.add(v)
+    return formatar_brl(float(v))
+
+
+def ajustar_contrapartes_pedidas(caso: Caso, texto: str, rng: Optional[random.Random] = None) -> List[str]:
+    """Quantidade LIMITADA pedida (1 a 5, por lado): cada lado com limite fica com exatamente N contrapartes,
+    preenchidas só com o que o analista informou (com N = 1 a contraparte leva o total do lado). Com o lado
+    restrito, só as especificações explícitas do texto (renda baixa/alta, localidade) são aplicadas."""
+    rng = rng or random.Random()
+    pol = politica_contrapartes(texto)
+    avisos: List[str] = []
+    perfil = perfil_renda_contrapartes(texto)
+    loc = localidade_contrapartes(texto)
+    cidade_titular = (caso.cidade_estado or "").strip() if not caso.eh_pj() else ""
+    for lado, rotulo, attr_lista, attr_total, attr_cont in (
+            ("cred", "crédito", "contrapartes_credito", "mov_total_credito", "mov_total_contrapartes_credito"),
+            ("deb", "débito", "contrapartes_debito", "mov_total_debito", "mov_total_contrapartes_debito")):
+        n = pol["limite"][lado]
+        lista = getattr(caso, attr_lista)
+        total = parse_valor_br(getattr(caso, attr_total))
+        if not n or (total <= 0 and not lista):
+            continue
+        if len(lista) > n:
+            del lista[n:]
+            avisos.append(f"O texto pediu {n} contraparte(s) de {rotulo}; as demais foram removidas.")
+        while len(lista) < n and total > 0:
+            lista.append(ContraparteMovimentacao(tipo="Pessoa Física"))
+        setattr(caso, attr_cont, str(len(lista)))
+        if n == 1 and lista and total > 0:
+            c = lista[0]
+            if not (c.porcentagem or "").strip():
+                c.porcentagem = "100%"
+            if not (c.valor or "").strip():
+                c.valor = formatar_brl(total)
+        if pol["permissao"]:
+            continue  # pediu para preencher o resto: completar_contrapartes cuida do preenchimento
+        rendas: set = set()
+        for c in lista:  # só o que o texto especificou de forma explícita
+            if c.tipo != "Pessoa Jurídica" and perfil and not (c.renda_presumida or "").strip():
+                c.renda_presumida = _renda_aleatoria(perfil, rng, rendas)
+            if not (c.cidade_estado or "").strip():
+                if loc == "MESMA" and cidade_titular:
+                    c.cidade_estado = cidade_titular
+                elif loc == "DIFERENTE":
+                    c.cidade_estado = rng.choice([x for x in _CIDADES if x.lower() != cidade_titular.lower()])
+    return avisos
+
+
+def completar_contrapartes(caso: Caso, texto: str = "", rng: Optional[random.Random] = None) -> List[str]:
+    """Rede de segurança da regra 25: quando o texto fala de contrapartes e há total movimentado no lado,
+    mas a IA não as devolveu, cria as principais; e preenche os campos que ficaram em branco
+    (nome, idade, cidade/estado, renda presumida, registro profissional, valor, porcentagem e número de
+    transações). Devolve avisos em português."""
+    rng = rng or random.Random()
+    avisos: List[str] = []
+    pol = politica_contrapartes(texto)
+    if not (pol["livre"]["cred"] or pol["livre"]["deb"]):
+        return avisos  # só o pedido: nada de criar nem completar contrapartes sozinho
+    t = _sem_acento(texto)
+    perfil = perfil_renda_contrapartes(texto)
+    fragmentacao, fracionamento = menciona_fragmentacao(texto), menciona_fracionamento(texto)
+    loc = localidade_contrapartes(texto)
+    cidade_titular = (caso.cidade_estado or "").strip() if not caso.eh_pj() else ""
+    pool_cidades = [c for c in _CIDADES if loc != "DIFERENTE" or c.lower() != cidade_titular.lower()]
+
+    for lado, rotulo, attr_lista, attr_total, attr_cont in (
+            ("cred", "crédito", "contrapartes_credito", "mov_total_credito", "mov_total_contrapartes_credito"),
+            ("deb", "débito", "contrapartes_debito", "mov_total_debito", "mov_total_contrapartes_debito")):
+        if not pol["livre"][lado]:
+            continue
+        lista = getattr(caso, attr_lista)
+        total = parse_valor_br(getattr(caso, attr_total))
+        if total <= 0:
+            continue
+        informado = re.search(r"\d+", getattr(caso, attr_cont) or "")
+        if not lista and ("contraparte" in t or informado or fragmentacao or fracionamento):
+            n = min(int(informado.group()), 5) if informado else 4
+            n = max(n, 1)
+            if fragmentacao:
+                pcts = rng.sample(range(2, 9), min(n, 7))
+            else:
+                pcts = [30, 22, 15, 10, 6][:n]  # plano B, já distintos e com soma baixa
+                for _ in range(100):  # sorteia porcentagens DISTINTAS que somem até 90%
+                    candidatas = sorted(rng.sample(range(5, 31), n), reverse=True)
+                    if sum(candidatas) <= 90:
+                        pcts = candidatas
+                        break
+            for pct in pcts[:n]:
+                lista.append(ContraparteMovimentacao(tipo="Pessoa Física", porcentagem=f"{pct}%"))
+            avisos.append(f"O resumo não detalhava as contrapartes de {rotulo}; o Sentinela criou {len(lista)} "
+                          "contrapartes principais com dados aleatórios. Revise nomes, valores e quantidades.")
+        rendas: set = set()
+        primeiros_nomes = {(c.nome or "").split(" ")[0] for c in lista if (c.nome or "").strip()}
+        for c in lista:
+            pj = c.tipo == "Pessoa Jurídica"
+            if not (c.nome or "").strip():
+                if pj:
+                    c.nome = f"{rng.choice(_SOBRENOMES)} {rng.choice(_RAMOS).split()[0]} {rng.choice(_SUFIXOS_EMPRESA)}"
+                else:
+                    livres = [n for n in _NOMES if n not in primeiros_nomes] or _NOMES  # sem repetir o 1º nome
+                    primeiro = rng.choice(livres)
+                    primeiros_nomes.add(primeiro)
+                    c.nome = f"{primeiro} {rng.choice(_SOBRENOMES)} {rng.choice(_SOBRENOMES)}"
+            if not (c.cidade_estado or "").strip():
+                c.cidade_estado = cidade_titular if (loc == "MESMA" and cidade_titular) else rng.choice(pool_cidades)
+            if not (c.num_transacoes or "").strip():
+                c.num_transacoes = str(rng.randint(30, 150) if fracionamento else rng.randint(3, 40))
+            if not (c.porcentagem or "").strip() and not (c.valor or "").strip():
+                c.porcentagem = f"{rng.randint(2, 20)}%"
+            if pj:
+                if not (c.data_abertura or "").strip():
+                    c.data_abertura = f"{rng.randint(1, 28):02d}/{rng.randint(1, 12):02d}/{rng.randint(2005, 2023)}"
+                if not (c.ramo_atividade or "").strip():
+                    c.ramo_atividade = rng.choice(_RAMOS)
+                if not (c.porte or "").strip():
+                    c.porte = "Microempresa (ME)"
+                if not (c.faturamento_presumido or "").strip():
+                    c.faturamento_presumido = formatar_brl(float(rng.randint(20, 100) * 1000))
+            else:
+                if not (c.idade or "").strip():
+                    c.idade = str(rng.randint(19, 62))
+                if not (c.renda_presumida or "").strip():
+                    c.renda_presumida = _renda_aleatoria(perfil, rng, rendas)
+                if not (c.registro_profissional or "").strip():
+                    cargo = rng.choice(_CARGOS[perfil if perfil in _CARGOS else ""])
+                    c.registro_profissional = cargo if perfil == "ALTA" else f"{cargo}, sem registro profissional"
+    return avisos
+
+
+_RE_SEM_EVASAO = re.compile(r"\bsem\s+(?:rapid[ao]s?\s+)?(?:evasao|repasses?\s+rapidos?)"
+                            r"|\bnao\s+(?:houve|ha|teve|tem)\s+(?:rapid\w+\s+)?(?:evasao|repasses?)")
+_RE_COM_EVASAO = re.compile(r"rapid[ao]s?\s+evasao|evasao\s+rapida|repasses?\s+rapidos?|\bevadi\w+|"
+                            r"(?:enviad\w+|transferid\w+|repassad\w+|sacad\w+|movimentad\w+)\s+"
+                            r"(?:logo|rapidamente|imediatamente|em\s+seguida)|logo\s+(?:apos|depois)|"
+                            r"\bimediatamente\b|\brapidamente\b|\bno\s+mesmo\s+dia\b|\bem\s+seguida\b")
+_RE_SO_DEBITOS = re.compile(r"\b(?:so|somente|apenas)\s+(?:os\s+)?debitos?\b|\bsem\s+(?:os\s+)?(?:creditos?|recebimentos?)\b"
+                            r"|\bnao\s+(?:houve|ha|teve|tem)\s+(?:creditos?|recebimentos?)\b"
+                            r"|\bja\s+estava(?:m)?\s+na\s+conta\b")
+_RE_SO_CREDITOS = re.compile(r"\b(?:so|somente|apenas)\s+(?:os\s+)?creditos?\b|\bsem\s+(?:os\s+)?debitos?\b"
+                             r"|\bnao\s+(?:houve|ha|teve|tem)\s+debitos?\b"
+                             r"|\breceb\w+[^.;\n]*\bnao\s+(?:foram\s+|houve\s+|ha\s+)?(?:evadid\w+|evadiu|enviad\w+|enviou|transferid\w+|transferiu|repassad\w+|repassou)")
+
+
+def evasao_cripto_do_texto(texto: str) -> str:
+    """Modo da timeline de criptomoedas pela instrução do analista (reforço em código: a IA também devolve
+    "evasaoCripto"): 'Só Débitos (Sem Créditos)', 'Só Créditos (Sem Débitos)', 'Sem Rápida Evasão',
+    'Rápida Evasão' ou ''. Os modos de um lado só são testados antes; a negação de evasão vem depois."""
+    t = _sem_acento(texto)
+    if _RE_SO_DEBITOS.search(t):
+        return CRIPTO_SO_DEBITOS
+    if _RE_SO_CREDITOS.search(t):
+        return CRIPTO_SO_CREDITOS
+    if _RE_SEM_EVASAO.search(t):
+        return "Sem Rápida Evasão"
+    return "Rápida Evasão" if _RE_COM_EVASAO.search(t) else ""
+
+
 def _menciona_concentracao(texto: str) -> bool:
     return "concentra" in _sem_acento(texto)
 
@@ -314,13 +654,20 @@ def montar_mensagem_usuario(texto: str, texto_outras_movimentacoes: str = "") ->
     e separados (resumo principal e outras movimentações não bancárias)."""
     outras = (texto_outras_movimentacoes or "").strip()
     invencao = autoriza_invencao(texto) or autoriza_invencao(outras)
+    pol = politica_contrapartes(texto)
     sn = lambda v: "SIM" if v else "NÃO"  # noqa: E731
     return (
         f"INVENÇÃO AUTORIZADA: {sn(invencao)}\n"
         f"FRAGMENTAÇÃO: {sn(menciona_fragmentacao(texto))}\n"
         f"FRACIONAMENTO ENTRE CONTRAPARTES: {sn(menciona_fracionamento(texto))}\n"
         f"ARREDONDAMENTO DIVERSO: {sn(menciona_arredondamento_diverso(texto))}\n"
-        f"LOCALIDADE DAS CONTRAPARTES: {localidade_contrapartes(texto) or 'NÃO INFORMADA'}\n\n"
+        f"LOCALIDADE DAS CONTRAPARTES: {localidade_contrapartes(texto) or 'NÃO INFORMADA'}\n"
+        f"APENAS O PEDIDO: {sn(pol['restrito'])}\n"
+        + (("NÚMERO DE CONTRAPARTES PEDIDO: " + ", ".join(
+            f"{nome} {pol['limite'][k]}" for k, nome in (("cred", "CRÉDITO"), ("deb", "DÉBITO"))
+            if pol["limite"][k]) + "\n") if any(pol["limite"].values()) else "")
+        + f"PREENCHER CONTRAPARTES AUTOMATICAMENTE: CRÉDITO {sn(pol['livre']['cred'])}, DÉBITO {sn(pol['livre']['deb'])}\n"
+        + "\n"
         "### RESUMO DO CASO\n" + (texto or "").strip() + "\n\n"
         "### OUTRAS MOVIMENTAÇÕES (NÃO BANCÁRIAS)\n" + (outras or "(vazio)")
     )
@@ -561,6 +908,26 @@ def _evasao(v: Any) -> str:
     return ""
 
 
+def _modo_cripto(v: Any) -> str:
+    """Valor da timeline de criptomoedas devolvido pela IA: os dois padrões de evasão ou um dos lados só."""
+    s = _sem_acento(_txt(v))
+    if not s:
+        return ""
+    if re.search(r"so\s+debit|somente\s+debit|apenas\s+debit|sem\s+credit", s):
+        return CRIPTO_SO_DEBITOS
+    if re.search(r"so\s+credit|somente\s+credit|apenas\s+credit|sem\s+debit", s):
+        return CRIPTO_SO_CREDITOS
+    return _evasao(v)
+
+
+def _modo_timeline(v: Any) -> str:
+    """Valor de thundera.evasao (timeline bancária): os modos de cripto mais a evasão parcial."""
+    s = _sem_acento(_txt(v))
+    if re.search(r"parcial|pequena\s+parcela|parcela\s+pequena|pequeno\s+valor", s):
+        return EVASAO_PARCIAL
+    return _modo_cripto(v)
+
+
 def _set(caso: Any, attr: str, valor: str) -> None:
     """Nunca sobrescreve um campo com vazio."""
     if valor not in (None, ""):
@@ -741,7 +1108,9 @@ def aplicar_dados_extraidos(caso: Caso, dados: Dict[str, Any], hoje: Optional[da
     _set(caso, "comp_pix", _simnao(thun.get("pix")) or ("Sim" if pix else ""))
     if pix and caso.comp_pix == "Sim":
         caso.pix_itens = pix
-    _set(caso, "comp_evasao", _evasao(thun.get("evasao")))
+    _set(caso, "comp_evasao", _modo_timeline(thun.get("evasao")))
+    if caso.tipo_caso == TIPO_CRIPTO:
+        _set(caso, "comp_evasao_cripto", _modo_cripto(thun.get("evasaoCripto")))
     mud = thun.get("mudancaComportamento")
     if isinstance(mud, dict) and _simnao(mud.get("houve")) == "Sim":
         caso.comp_mudanca_comportamento = gerar_narrativa_mudanca_comportamento(
@@ -865,7 +1234,7 @@ def coerencia_extracao(caso: Caso, texto: str = "", invencao_autorizada: Optiona
             avisos.append(f"As contrapartes de {rotulo} têm todas a mesma renda presumida ({rendas[0]}). "
                           "Varie os valores entre elas.")
     # endereço do sócio não informado = endereço da empresa
-    if caso.eh_pj() and (caso.endereco or "").strip():
+    if caso.eh_pj() and (caso.endereco or "").strip() and not restringe_ao_pedido(texto):
         for so in caso.socios:
             if not (so.endereco or "").strip():
                 so.endereco = caso.endereco
@@ -882,28 +1251,10 @@ def coerencia_extracao(caso: Caso, texto: str = "", invencao_autorizada: Optiona
 
 
 def completar_obrigatorios(caso: Caso, hoje: Optional[date] = None) -> Caso:
-    """Completa com marcações neutras os campos obrigatórios que o texto não detalha,
-    para não travar a geração. Não toca no nome do alerta, na data do alerta, na
-    sentença nem no gênero (o app pergunta quando o nome é ambíguo)."""
-
-    def _txt_neutro(attr: str) -> None:
-        if not (getattr(caso, attr) or "").strip():
-            setattr(caso, attr, NEUTRO)
-
-    def _valor_neutro(attr: str) -> None:
-        if not (getattr(caso, attr) or "").strip():
-            setattr(caso, attr, "R$0,00")
-
-    if caso.eh_pj():
-        for attr in ("nome_empresa", "data_abertura", "ramo_atividade", "porte", "endereco"):
-            _txt_neutro(attr)
-        _valor_neutro("faturamento_presumido")
-    else:
-        for attr in ("nome_cliente", "idade", "cidade_estado", "ultima_atualizacao_cadastral",
-                     "registro_profissional"):
-            _txt_neutro(attr)
-        _valor_neutro("renda_presumida")
-
+    """Fecha o que o formulário precisa para abrir de forma consistente: tipo de região de risco e de PEP
+    quando há "Sim" sem tipo, período padrão e contagem de contrapartes descritas. NÃO coloca marcadores
+    ("Não informado", R$0,00): o que não foi informado fica em branco e o dossiê não mostra esses campos.
+    Não toca no nome do alerta, na data do alerta, na sentença nem no gênero."""
     if caso.regiao_risco == "Sim" and not (caso.tipo_regiao_risco or "").strip():
         caso.tipo_regiao_risco = TIPOS_REGIAO_RISCO_1[2]
     if caso.pep == "Sim" and not (caso.tipo_pep or "").strip():
@@ -916,11 +1267,9 @@ def completar_obrigatorios(caso: Caso, hoje: Optional[date] = None) -> Caso:
 
     if not (caso.mov_periodo or "").strip() or not parse_periodo(caso.mov_periodo):
         caso.mov_periodo = periodo_padrao(hoje)
-    _valor_neutro("mov_total_credito")
-    _valor_neutro("mov_total_debito")
-    if not (caso.mov_total_contrapartes_credito or "").strip():
+    if not (caso.mov_total_contrapartes_credito or "").strip() and caso.contrapartes_credito:
         caso.mov_total_contrapartes_credito = str(len(caso.contrapartes_credito))
-    if not (caso.mov_total_contrapartes_debito or "").strip():
+    if not (caso.mov_total_contrapartes_debito or "").strip() and caso.contrapartes_debito:
         caso.mov_total_contrapartes_debito = str(len(caso.contrapartes_debito))
     return caso
 
@@ -1088,6 +1437,20 @@ def aplicar_mudanca_respondida(caso: Caso, mudanca: Dict[str, Any], avisos: List
         caso.comp_data_abertura_ultimo_reporte = mudanca["data_conta"]
 
 
+def _ajustar_evasao_cripto(caso: Caso) -> None:
+    """Timeline de cripto: só casos Cripto com montante em Outras Movimentações (Criptomoedas). Se a IA não
+    marcou a evasão, lê a instrução da própria descrição; sem montante, não há timeline de cripto."""
+    if caso.tipo_caso != TIPO_CRIPTO:
+        caso.comp_evasao_cripto = ""
+        return
+    if montante_cripto(caso) <= 0:
+        caso.comp_evasao_cripto = ""
+        return
+    if not caso.comp_evasao_cripto:
+        instrucao = " ".join(m.info for m in caso.outras_movimentacoes if m.tipo == "Criptomoedas")
+        caso.comp_evasao_cripto = evasao_cripto_do_texto(instrucao)
+
+
 def extrair_caso_via_ia(tipo_caso: str, fator_gerador: str, data_alerta: str, sentenca: str,
                           resumo: str, outras_movimentacoes: str = "", hoje: Optional[date] = None,
                           mudanca: Optional[Dict[str, Any]] = None,
@@ -1101,8 +1464,10 @@ def extrair_caso_via_ia(tipo_caso: str, fator_gerador: str, data_alerta: str, se
     caso.sentenca = sentenca
     dados = extrair_dados_do_texto(resumo, outras_movimentacoes, tipo_caso=tipo_caso, **kw)
     aplicar_dados_extraidos(caso, dados, hoje)
+    _ajustar_evasao_cripto(caso)
     texto_total = f"{resumo}\n{outras_movimentacoes}"
-    avisos = coerencia_extracao(caso, texto_total)
+    avisos_cp = ajustar_contrapartes_pedidas(caso, texto_total) + completar_contrapartes(caso, texto_total)
+    avisos = avisos_cp + coerencia_extracao(caso, texto_total)
     if mudanca:
         aplicar_mudanca_respondida(caso, mudanca, avisos)
     return caso, avisos

@@ -17,7 +17,7 @@ from unittest import mock
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import ia  # noqa: E402
-from core import Caso, NEUTRO, Socio, periodo_padrao  # noqa: E402
+from core import Caso, Socio, periodo_padrao  # noqa: E402
 
 HOJE = date(2026, 10, 3)
 
@@ -651,7 +651,7 @@ class TestLocalidadeRendaPorte(unittest.TestCase):
         self.assertEqual([s.endereco for s in caso.socios], ["Rua A, 10 - Recife/PE", "Rua B, 5"])
 
     def test_regras_de_aleatoriedade_renda_e_porte_no_prompt(self):
-        for trecho in ("PREENCHIMENTO ALEATÓRIO SEMPRE PERMITIDO", "SEMPRE crie nomes aleatórios",
+        for trecho in ("PREENCHIMENTO ALEATÓRIO DAS CONTRAPARTES", "SEMPRE crie nomes aleatórios",
                        "mesmo endereço da empresa", "coerente com o ramo de atividade",
                        "entre R$1.300,00 e R$3.200,00", "salário mínimo 2026 = R$1.621,00",
                        "entre R$35.000,00 e R$150.000,00", "acima de 20 salários mínimos", "DIFERENTE dos demais",
@@ -669,7 +669,7 @@ class TestTodosOsTiposDeCaso(unittest.TestCase):
 
     COMUNS = ("UMA INFORMAÇÃO POR LINHA", "FRAGMENTAÇÃO (linha", "FRACIONAMENTO ENTRE CONTRAPARTES (linha",
               "ARREDONDAMENTO DIVERSO (linha", "os DOIS comportamentos existem ao mesmo tempo",
-              "PREENCHIMENTO ALEATÓRIO SEMPRE PERMITIDO", "SEMPRE crie nomes aleatórios",
+              "PREENCHIMENTO ALEATÓRIO DAS CONTRAPARTES", "SEMPRE crie nomes aleatórios",
               "LOCALIDADE DAS CONTRAPARTES", "entre R$1.300,00 e R$3.200,00", "entre R$35.000,00 e R$150.000,00",
               "DIFERENTE dos demais", "MEI até R$81.000,00", "Médio Porte de R$4.800.000,01 a R$300.000.000,00",
               "entre R$20.000,00 e R$100.000,00", "CRIE uma entrada por contraparte", "\"pepDetalhe\"",
@@ -720,6 +720,434 @@ class TestTodosOsTiposDeCaso(unittest.TestCase):
                 self.assertEqual(sum(k.startswith("cp__cred__") for k in ia.faltas_kyc(caso)), 3)
                 self.assertEqual(len(caso.comp_mudanca_comportamento.splitlines()), 6)
                 self.assertEqual(caso.comp_data_abertura_ultimo_reporte, "10/01/2025")
+
+
+class TestContrapartesSempreDetalhadas(unittest.TestCase):
+    """Regressão: resumo só com o perfil das contrapartes e o montante deixava os blocos em branco."""
+    TEXTO = "Cliente com renda baixa movimentou R$300.000,00 de crédito e R$290.000,00 de débito com contrapartes sem renda elevada."
+
+    def _dados(self, cp_cred=(), cp_deb=(), total_cp=""):
+        return {"kyc": {"nome": "Ana Lima", "idade": "30", "cidadeEstado": "Fortaleza/CE", "rendaPresumida": "R$1.800,00"},
+                "movimentacoes": {"periodo": "01/04/2026 até 30/06/2026", "totalCredito": "R$300.000,00",
+                                  "totalDebito": "R$290.000,00", "totalContrapartesCredito": total_cp,
+                                  "totalContrapartesDebito": total_cp,
+                                  "contrapartesCredito": list(cp_cred), "contrapartesDebito": list(cp_deb)}}
+
+    def _rodar(self, dados, texto=None, tipo="Pessoa Física (PF)"):
+        with mock.patch("ia.extrair_dados_do_texto", return_value=dados):
+            return ia.preencher_caso_via_ia(tipo, "Alerta", "15/06/2026", "S", texto or self.TEXTO, hoje=HOJE)
+
+    def test_perfil_de_renda_com_negacao(self):
+        self.assertEqual(ia.perfil_renda_contrapartes("contrapartes sem renda elevada"), "BAIXA")
+        self.assertEqual(ia.perfil_renda_contrapartes("Cliente com renda baixa"), "BAIXA")
+        self.assertEqual(ia.perfil_renda_contrapartes("contrapartes com renda alta"), "ALTA")
+        self.assertEqual(ia.perfil_renda_contrapartes("contrapartes diversas"), "")
+
+    def test_listas_vazias_viram_contrapartes_completas(self):
+        for _ in range(40):  # sorteios diferentes
+            caso, avisos = self._rodar(self._dados())
+            for lado, total in ((caso.contrapartes_credito, 300000.0), (caso.contrapartes_debito, 290000.0)):
+                self.assertGreaterEqual(len(lado), 3)
+                self.assertLessEqual(len(lado), 5)
+                rendas = [c.renda_presumida for c in lado]
+                self.assertEqual(len(set(rendas)), len(rendas), "rendas devem ser diferentes entre as contrapartes")
+                for c in lado:
+                    for campo in ("nome", "idade", "cidade_estado", "renda_presumida", "registro_profissional",
+                                  "valor", "porcentagem", "num_transacoes"):
+                        self.assertTrue((getattr(c, campo) or "").strip(), f"{campo} em branco")
+                    self.assertTrue(1300 <= ia.parse_valor_br(c.renda_presumida) <= 3200, c.renda_presumida)
+                pcts = [ia.parse_valor_br(c.porcentagem) for c in lado]
+                self.assertLessEqual(sum(pcts), 100.0)
+                self.assertEqual(len(set(pcts)), len(pcts), "porcentagens diferentes entre si")
+                self.assertLessEqual(sum(ia.parse_valor_br(c.valor) for c in lado), total)
+            for lado in (caso.contrapartes_credito, caso.contrapartes_debito):
+                primeiros = [c.nome.split(" ")[0] for c in lado]
+                self.assertEqual(len(set(primeiros)), len(primeiros), "nomes repetidos")
+            self.assertTrue(any("não detalhava as contrapartes de crédito" in a for a in avisos))
+            self.assertEqual(caso.mov_total_contrapartes_credito, str(len(caso.contrapartes_credito)))
+
+    def test_renda_alta_e_fragmentacao_com_fracionamento(self):
+        texto = "Contrapartes com renda alta, fragmentação e alto fracionamento. Movimentou R$300.000,00."
+        for _ in range(20):
+            caso, _ = self._rodar(self._dados(total_cp="120"), texto)
+            for c in caso.contrapartes_credito:
+                self.assertTrue(35000 <= ia.parse_valor_br(c.renda_presumida) <= 150000, c.renda_presumida)
+                self.assertTrue(30 <= int(c.num_transacoes) <= 150, c.num_transacoes)
+                self.assertLess(ia.parse_valor_br(c.porcentagem), 9)
+            self.assertEqual(caso.mov_total_contrapartes_credito, "120")
+
+    def test_campos_em_branco_de_contraparte_existente_sao_preenchidos(self):
+        cp = {"tipo": "Pessoa Física", "porcentagem": "20%"}
+        caso, avisos = self._rodar(self._dados(cp_cred=[cp, dict(cp, nome="Beto")], cp_deb=[cp]))
+        self.assertEqual(len(caso.contrapartes_credito), 2)
+        self.assertEqual(caso.contrapartes_credito[1].nome, "Beto")
+        for c in caso.contrapartes_credito + caso.contrapartes_debito:
+            for campo in ("nome", "idade", "cidade_estado", "renda_presumida", "registro_profissional", "num_transacoes"):
+                self.assertTrue((getattr(c, campo) or "").strip(), campo)
+        self.assertFalse(any("não detalhava" in a for a in avisos))
+
+    def test_nao_inventa_contrapartes_se_o_texto_nao_fala_delas(self):
+        caso, _ = self._rodar(self._dados(), texto="Cliente com renda baixa. Créditos de R$300.000,00.")
+        self.assertEqual(caso.contrapartes_credito, [])
+
+    def test_vale_para_todos_os_tipos(self):
+        from core import TIPOS_CASO
+        for tipo in TIPOS_CASO:
+            with self.subTest(tipo=tipo):
+                caso, _ = self._rodar(self._dados(), tipo=tipo)
+                self.assertGreaterEqual(len(caso.contrapartes_credito), 3)
+                self.assertTrue(all(c.nome and c.renda_presumida for c in caso.contrapartes_credito))
+
+    def test_mesma_localidade_e_localidade_diferente(self):
+        caso, _ = self._rodar(self._dados(), self.TEXTO + " Contrapartes da mesma localidade.")
+        self.assertEqual({c.cidade_estado for c in caso.contrapartes_credito}, {"Fortaleza/CE"})
+        for _ in range(20):
+            caso, avisos = self._rodar(self._dados(), self.TEXTO + " Contrapartes sem vínculo aparente.")
+            self.assertNotIn("Fortaleza/CE", {c.cidade_estado for c in caso.contrapartes_credito})
+            self.assertFalse(any("localidades diferentes" in a for a in avisos))
+
+    def test_regra_25_no_prompt(self):
+        self.assertIn("CONTRAPARTES DETALHADAS QUANDO PERMITIDO", ia.SYSTEM_PROMPT_PF)
+        self.assertIn("Nos lados com NÃO, NÃO crie contrapartes além das que o texto descreve", ia.SYSTEM_PROMPT_PJ)
+
+
+class TestApenasOPedido(unittest.TestCase):
+    """Se o analista pede só o que informou ("uma contraparte só", "preencha apenas..."), o Sentinela não preenche o resto."""
+    BRANCOS = ("nome", "idade", "cidade_estado", "renda_presumida", "registro_profissional", "num_transacoes")
+
+    def _dados(self, cp_cred=(), cp_deb=()):
+        return {"kyc": {"nome": "Ana Lima", "idade": "30", "cidadeEstado": "Fortaleza/CE"},
+                "movimentacoes": {"periodo": "01/04/2026 até 30/06/2026", "totalCredito": "R$300.000,00",
+                                  "totalDebito": "R$290.000,00", "contrapartesCredito": list(cp_cred),
+                                  "contrapartesDebito": list(cp_deb)}}
+
+    def _rodar(self, dados, texto, tipo="Pessoa Física (PF)"):
+        with mock.patch("ia.extrair_dados_do_texto", return_value=dados):
+            return ia.preencher_caso_via_ia(tipo, "Alerta", "15/06/2026", "S", texto, hoje=HOJE)
+
+    def test_detecta_pedidos_restritos(self):
+        for t in ("Cliente teve uma contraparte só", "movimentou com uma única contraparte", "apenas uma contraparte",
+                  "somente 2 contrapartes", "preencha apenas o que eu informei", "preencha só o nome e a idade",
+                  "não preencha o resto", "não preencha o restante automaticamente", "sem preencher o restante",
+                  "não invente nada", "só o que eu pedi", "teve 1 contraparte", "contraparte única"):
+            self.assertTrue(ia.restringe_ao_pedido(t), t)
+
+    def test_nao_detecta_em_pedidos_normais(self):
+        for t in ("Cliente com renda baixa movimentou R$300.000,00 com contrapartes sem renda elevada.",
+                  "diversas contrapartes, fragmentação e alto fracionamento", "contrapartes da mesma localidade",
+                  "invente nomes aleatórios para as contrapartes", "só tem conta corrente há 2 anos",
+                  "12 contrapartes de crédito e 12 de débito", "3 contrapartes são PEP e uma contraparte tem mídia negativa",
+                  "Contraparte principal: João, 30%"):
+            self.assertFalse(ia.restringe_ao_pedido(t), t)
+
+    def test_numero_de_contrapartes_pedido(self):
+        self.assertEqual(ia.contrapartes_pedidas("teve uma contraparte só"), 1)
+        self.assertEqual(ia.contrapartes_pedidas("apenas duas contrapartes"), 2)
+        self.assertIsNone(ia.contrapartes_pedidas("12 contrapartes"))
+        self.assertIsNone(ia.contrapartes_pedidas("preencha só o que informei"))
+
+    def test_nao_invente_nao_autoriza_invencao(self):
+        for t in ("não invente nada", "sem valores aleatórios", "nunca invente"):
+            self.assertFalse(ia.autoriza_invencao(t), t)
+        for t in ("invente os nomes", "nomes aleatórios"):
+            self.assertTrue(ia.autoriza_invencao(t), t)
+        self.assertIn("INVENÇÃO AUTORIZADA: NÃO", ia.montar_mensagem_usuario("não invente nada, só o que eu disser"))
+
+    def test_mensagem_traz_a_diretriz(self):
+        m = ia.montar_mensagem_usuario("Cliente teve uma contraparte só")
+        self.assertIn("APENAS O PEDIDO: SIM", m)
+        self.assertIn("NÚMERO DE CONTRAPARTES PEDIDO: CRÉDITO 1, DÉBITO 1", m)
+        self.assertIn("PREENCHER CONTRAPARTES AUTOMATICAMENTE: CRÉDITO NÃO, DÉBITO NÃO", m)
+        m = ia.montar_mensagem_usuario("Cliente com renda baixa e contrapartes diversas")
+        self.assertIn("APENAS O PEDIDO: NÃO", m)
+        self.assertNotIn("NÚMERO DE CONTRAPARTES PEDIDO", m)
+
+    def test_uma_contraparte_so_cria_exatamente_uma_e_nao_preenche_o_resto(self):
+        for _ in range(20):
+            caso, _ = self._rodar(self._dados(), "Cliente teve uma contraparte só, movimentou R$300.000,00.")
+            for lado, total in ((caso.contrapartes_credito, "R$300.000,00"), (caso.contrapartes_debito, "R$290.000,00")):
+                self.assertEqual(len(lado), 1)
+                c = lado[0]
+                self.assertEqual((c.porcentagem, c.valor), ("100%", total))
+                for campo in self.BRANCOS:
+                    self.assertEqual(getattr(c, campo), "", f"{campo} não deveria ser preenchido")
+            self.assertEqual((caso.mov_total_contrapartes_credito, caso.mov_total_contrapartes_debito), ("1", "1"))
+
+    def test_uma_contraparte_so_remove_o_excedente_da_ia(self):
+        cps = [{"tipo": "Pessoa Física", "nome": f"C{i}", "porcentagem": "20%"} for i in range(4)]
+        caso, avisos = self._rodar(self._dados(cps, cps), "Houve uma contraparte só.")
+        self.assertEqual([c.nome for c in caso.contrapartes_credito], ["C0"])
+        self.assertEqual(caso.mov_total_contrapartes_credito, "1")
+        self.assertTrue(any("removidas" in a for a in avisos))
+
+    def test_contraparte_pedida_mantem_so_o_que_o_texto_trouxe(self):
+        cp = {"tipo": "Pessoa Física", "nome": "João Silva", "idade": "40"}
+        caso, _ = self._rodar(self._dados([cp], [cp]), "Movimentou com uma contraparte só: João Silva, 40 anos.")
+        c = caso.contrapartes_credito[0]
+        self.assertEqual((c.nome, c.idade), ("João Silva", "40"))
+        for campo in ("cidade_estado", "renda_presumida", "registro_profissional", "num_transacoes"):
+            self.assertEqual(getattr(c, campo), "", campo)
+
+    def test_restricao_generica_nao_cria_nem_completa_nada(self):
+        caso, avisos = self._rodar(self._dados(), "Cliente com contrapartes. Preencha apenas o que eu informei.")
+        self.assertEqual((caso.contrapartes_credito, caso.contrapartes_debito), ([], []))
+        self.assertFalse(any("não detalhava" in a for a in avisos))
+        cp = {"tipo": "Pessoa Física", "nome": "João", "porcentagem": "20%"}
+        caso, _ = self._rodar(self._dados([cp]), "Preencha só o que eu informei sobre as contrapartes.")
+        self.assertEqual((caso.contrapartes_credito[0].idade, caso.contrapartes_credito[0].renda_presumida), ("", ""))
+
+    def test_socio_sem_endereco_nao_recebe_o_da_empresa_quando_restrito(self):
+        caso = Caso(numero_caso="t", tipo_caso="Pessoa Jurídica (PJ)", endereco="Rua A, 10")
+        caso.socios = [Socio(nome="Ana")]
+        ia.coerencia_extracao(caso, "Preencha apenas o que informei.")
+        self.assertEqual(caso.socios[0].endereco, "")
+        ia.coerencia_extracao(caso, "")
+        self.assertEqual(caso.socios[0].endereco, "Rua A, 10")
+
+    def test_valem_em_todos_os_tipos(self):
+        from core import TIPOS_CASO
+        for tipo in TIPOS_CASO:
+            with self.subTest(tipo=tipo):
+                self.assertIn("APENAS O PEDIDO", ia.prompt_para_tipo(tipo))
+                caso, _ = self._rodar(self._dados(), "Teve uma contraparte só.", tipo=tipo)
+                self.assertEqual(len(caso.contrapartes_credito), 1)
+                self.assertEqual(caso.contrapartes_credito[0].nome, "")
+
+
+class TestQuandoPreencherContrapartes(unittest.TestCase):
+    """Só se faz o que o analista pediu, a menos que haja fragmentação/fracionamento, "muitas contrapartes",
+    perfil das contrapartes ou pedido explícito para preencher o restante."""
+
+    def _pol(self, texto):
+        return ia.politica_contrapartes(texto)
+
+    def test_numero_limitado_por_lado_so_faz_o_pedido(self):
+        p = self._pol("As transações foram pontuais: apenas uma contraparte de crédito e uma de débito.")
+        self.assertEqual(p["limite"], {"cred": 1, "deb": 1})
+        self.assertTrue(p["restrito"])
+        self.assertEqual(p["livre"], {"cred": False, "deb": False})
+        p = self._pol("Movimentou com 3 contrapartes de crédito e 2 de débito.")
+        self.assertEqual((p["limite"], p["livre"]), ({"cred": 3, "deb": 2}, {"cred": False, "deb": False}))
+        p = self._pol("Somente duas contrapartes de crédito.")
+        self.assertEqual(p["limite"], {"cred": 2, "deb": None})
+
+    def test_sinais_que_liberam_o_preenchimento(self):
+        for t in ("Houve fragmentação nos créditos.", "Houve fracionamento entre as contrapartes.",
+                  "Movimentou com diversas contrapartes.", "Foram muitas contrapartes de crédito.",
+                  "Grande número de contrapartes.", "Movimentou com 40 contrapartes.",
+                  "Contrapartes sem renda elevada, R$300.000,00.", "Contrapartes da mesma localidade do titular.",
+                  "Pode preencher o restante.", "Preencha as demais contrapartes.", "Invente os nomes das contrapartes."):
+            self.assertEqual(self._pol(t)["livre"], {"cred": True, "deb": True}, t)
+            self.assertFalse(self._pol(t)["restrito"], t)
+
+    def test_sem_sinal_nenhum_nao_preenche(self):
+        for t in ("Movimentou R$300.000,00 com contrapartes.", "Cliente de 30 anos. Créditos de R$100.000,00.",
+                  "Contraparte principal: João, 30%."):
+            self.assertEqual(self._pol(t)["livre"], {"cred": False, "deb": False}, t)
+
+    def test_perfil_do_titular_nao_libera_as_contrapartes(self):
+        p = self._pol("Cliente com renda baixa. Teve duas contrapartes.")
+        self.assertEqual(p["livre"], {"cred": False, "deb": False})
+
+    def test_pedido_explicito_vence_o_limite(self):
+        p = self._pol("Apenas uma contraparte de crédito, mas pode preencher o restante.")
+        self.assertEqual(p["limite"]["cred"], 1)
+        self.assertFalse(p["restrito"])
+        self.assertTrue(p["livre"]["cred"])
+
+    def test_restricao_geral_vence_os_sinais(self):
+        p = self._pol("Diversas contrapartes. Não preencha o resto.")
+        self.assertTrue(p["restrito"])
+        self.assertEqual(p["livre"], {"cred": False, "deb": False})
+
+    def test_lados_mistos(self):
+        p = self._pol("12 contrapartes de crédito e apenas uma de débito.")
+        self.assertEqual(p["limite"], {"cred": None, "deb": 1})
+        self.assertEqual(p["livre"], {"cred": True, "deb": False})
+
+    def test_mensagem_traz_o_que_pode_preencher(self):
+        m = ia.montar_mensagem_usuario("Houve fragmentação e apenas uma contraparte de débito.")
+        self.assertIn("PREENCHER CONTRAPARTES AUTOMATICAMENTE: CRÉDITO SIM, DÉBITO NÃO", m)
+        self.assertIn("NÚMERO DE CONTRAPARTES PEDIDO: DÉBITO 1", m)
+
+    # ---- comportamento -------------------------------------------------------------------------
+    def _rodar(self, texto, cred=(), deb=(), total_cp=""):
+        d = {"kyc": {"nome": "Ana Lima", "idade": "30", "cidadeEstado": "Fortaleza/CE"},
+             "movimentacoes": {"periodo": "01/04/2026 até 30/06/2026", "totalCredito": "R$300.000,00",
+                               "totalDebito": "R$290.000,00", "totalContrapartesCredito": total_cp,
+                               "contrapartesCredito": list(cred), "contrapartesDebito": list(deb)}}
+        with mock.patch("ia.extrair_dados_do_texto", return_value=d):
+            return ia.preencher_caso_via_ia("Pessoa Física (PF)", "Alerta", "15/06/2026", "S", texto, hoje=HOJE)
+
+    BRANCOS = ("nome", "idade", "cidade_estado", "renda_presumida", "registro_profissional", "num_transacoes")
+
+    def test_pontuais_uma_de_credito_e_uma_de_debito(self):
+        for _ in range(20):
+            caso, _ = self._rodar("Transações pontuais: apenas uma contraparte de crédito e uma de débito.")
+            for lado, total in ((caso.contrapartes_credito, "R$300.000,00"), (caso.contrapartes_debito, "R$290.000,00")):
+                self.assertEqual(len(lado), 1)
+                self.assertEqual((lado[0].porcentagem, lado[0].valor), ("100%", total))
+                for campo in self.BRANCOS:
+                    self.assertEqual(getattr(lado[0], campo), "", campo)
+
+    def test_tres_de_credito_e_duas_de_debito_nao_cria_alem(self):
+        caso, _ = self._rodar("Movimentou com 3 contrapartes de crédito e 2 de débito.")
+        self.assertEqual((len(caso.contrapartes_credito), len(caso.contrapartes_debito)), (3, 2))
+        self.assertTrue(all(getattr(c, campo) == "" for c in caso.contrapartes_credito for campo in self.BRANCOS))
+
+    def test_fragmentacao_libera_o_preenchimento_completo(self):
+        for _ in range(20):
+            caso, _ = self._rodar("Houve fragmentação, com diversas contrapartes. Movimentou R$300.000,00.", total_cp="120")
+            for lado in (caso.contrapartes_credito, caso.contrapartes_debito):
+                self.assertGreaterEqual(len(lado), 3)
+                for c in lado:
+                    for campo in self.BRANCOS:
+                        self.assertTrue(getattr(c, campo), campo)
+
+    def test_limite_com_pedido_explicito_preenche_as_contrapartes_pedidas(self):
+        caso, _ = self._rodar("Apenas uma contraparte de crédito e uma de débito. Pode preencher o restante.")
+        for lado in (caso.contrapartes_credito, caso.contrapartes_debito):
+            self.assertEqual(len(lado), 1)
+            for campo in self.BRANCOS:
+                self.assertTrue(getattr(lado[0], campo), campo)
+
+    def test_lados_mistos_no_preenchimento(self):
+        caso, _ = self._rodar("Movimentou com 12 contrapartes de crédito e apenas uma de débito.")
+        self.assertGreaterEqual(len(caso.contrapartes_credito), 3)  # "muitas": preenche
+        self.assertTrue(all(c.nome for c in caso.contrapartes_credito))
+        self.assertEqual(len(caso.contrapartes_debito), 1)  # limite: só o pedido
+        self.assertEqual(caso.contrapartes_debito[0].nome, "")
+
+    def test_sem_sinal_nao_cria_contrapartes(self):
+        caso, _ = self._rodar("Movimentou R$300.000,00 com contrapartes.")
+        self.assertEqual((caso.contrapartes_credito, caso.contrapartes_debito), ([], []))
+
+    def test_limite_aplica_so_as_especificacoes_explicitas(self):
+        for _ in range(20):
+            caso, _ = self._rodar("Apenas uma contraparte de crédito e uma de débito, com renda baixa.")
+            for lado in (caso.contrapartes_credito, caso.contrapartes_debito):
+                c = lado[0]
+                self.assertTrue(1300 <= ia.parse_valor_br(c.renda_presumida) <= 3200, c.renda_presumida)  # pedido
+                for campo in ("nome", "idade", "registro_profissional", "num_transacoes"):
+                    self.assertEqual(getattr(c, campo), "", campo)  # o resto fica em branco
+        caso, _ = self._rodar("Apenas uma contraparte de crédito, da mesma localidade do titular.")
+        self.assertEqual(caso.contrapartes_credito[0].cidade_estado, "Fortaleza/CE")
+
+    def test_valem_em_todos_os_tipos(self):
+        from core import TIPOS_CASO
+        d = {"kyc": {"nome": "Ana"}, "movimentacoes": {"periodo": "01/04/2026 até 30/06/2026",
+                                                         "totalCredito": "R$300.000,00", "contrapartesCredito": []}}
+        for tipo in TIPOS_CASO:
+            with self.subTest(tipo=tipo), mock.patch("ia.extrair_dados_do_texto", return_value=d):
+                caso, _ = ia.preencher_caso_via_ia(tipo, "A", "15/06/2026", "S", "Apenas uma contraparte de crédito.", hoje=HOJE)
+                self.assertEqual((len(caso.contrapartes_credito), caso.contrapartes_credito[0].nome), (1, ""))
+                caso, _ = ia.preencher_caso_via_ia(tipo, "A", "15/06/2026", "S", "Houve fragmentação nos créditos.", hoje=HOJE)
+                self.assertTrue(all(c.nome for c in caso.contrapartes_credito))
+                self.assertGreaterEqual(len(caso.contrapartes_credito), 3)
+
+
+class TestEvasaoCripto(unittest.TestCase):
+    def test_detector_da_instrucao(self):
+        casos = {"Enviou R$200 mil e repassou rapidamente": "Rápida Evasão", "rápida evasão dos valores": "Rápida Evasão",
+                 "recebeu e enviou em seguida": "Rápida Evasão", "repasses rápidos": "Rápida Evasão",
+                 "sem rápida evasão": "Sem Rápida Evasão", "não houve repasse rápido": "Sem Rápida Evasão",
+                 "Comprou R$50 mil e manteve na carteira": "", "": "",
+                 # só créditos: recebido e não evadido
+                 "Recebeu R$200 mil em cripto, só créditos": "Só Créditos (Sem Débitos)",
+                 "sem débitos": "Só Créditos (Sem Débitos)", "Valores recebidos, mas não evadidos": "Só Créditos (Sem Débitos)",
+                 "Recebeu R$200 mil e não foram evadidos": "Só Créditos (Sem Débitos)",
+                 "Recebeu e não enviou nada": "Só Créditos (Sem Débitos)",
+                 # só débitos: sem recebimentos, valores que já estavam na conta
+                 "Sem créditos, só débitos": "Só Débitos (Sem Créditos)", "sem recebimentos": "Só Débitos (Sem Créditos)",
+                 "os valores já estavam na conta": "Só Débitos (Sem Créditos)",
+                 "não houve recebimentos, apenas transferências": "Só Débitos (Sem Créditos)",
+                 # "sem rápida evasão" continua sendo o padrão dos dois lados alternados
+                 "Recebeu R$200 mil, sem rápida evasão": "Sem Rápida Evasão"}
+        for texto, esperado in casos.items():
+            self.assertEqual(ia.evasao_cripto_do_texto(texto), esperado, texto)
+
+    def test_normaliza_o_que_a_ia_devolve(self):
+        casos = {"Só Débitos": "Só Débitos (Sem Créditos)", "somente débitos": "Só Débitos (Sem Créditos)",
+                 "Sem Créditos": "Só Débitos (Sem Créditos)", "Só Créditos (Sem Débitos)": "Só Créditos (Sem Débitos)",
+                 "só créditos": "Só Créditos (Sem Débitos)", "sem débitos": "Só Créditos (Sem Débitos)",
+                 "Rápida Evasão": "Rápida Evasão", "Sem Rápida Evasão": "Sem Rápida Evasão", "": "", None: ""}
+        for valor, esperado in casos.items():
+            self.assertEqual(ia._modo_cripto(valor), esperado, valor)
+
+    def test_prompt_de_cripto_traz_os_dois_modos(self):
+        for trecho in ('"Só Créditos (Sem Débitos)"', '"Só Débitos (Sem Créditos)"', "recebidos, mas NÃO evadidos",
+                       "já estavam na conta"):
+            self.assertIn(trecho, ia.SYSTEM_PROMPT_CRIPTO)
+        self.assertNotIn("evasaoCripto", ia.SYSTEM_PROMPT_PF)  # a regra da timeline de cripto é só do prompt de Cripto
+        self.assertIn("TIMELINE DE TRANSFERÊNCIAS", ia.SYSTEM_PROMPT_PF)  # a da timeline bancária vale para todos
+
+    def test_pipeline_com_os_modos_de_um_lado(self):
+        caso = self._rodar("Cripto", {"evasaoCripto": "Só Débitos"})
+        self.assertEqual(caso.comp_evasao_cripto, "Só Débitos (Sem Créditos)")
+        caso = self._rodar("Cripto", info="Recebeu R$200.000,00 em cripto, só créditos")
+        self.assertEqual(caso.comp_evasao_cripto, "Só Créditos (Sem Débitos)")
+        caso = self._rodar("Pessoa Física (PF)", {"evasaoCripto": "Só Débitos"})
+        self.assertEqual(caso.comp_evasao_cripto, "")
+
+    def test_so_o_prompt_de_cripto_tem_a_regra(self):
+        from core import TIPOS_CASO
+        for tipo in TIPOS_CASO:
+            tem = "evasaoCripto" in ia.prompt_para_tipo(tipo)
+            self.assertEqual(tem, tipo == "Cripto", tipo)
+        self.assertIn("SÓ para os valores de criptomoedas", ia.SYSTEM_PROMPT_CRIPTO)
+
+    def _rodar(self, tipo, thundera=None, info="Enviou R$200.000,00 para exchange, com rápida evasão", tipo_om="Criptomoedas"):
+        d = {"kyc": {"nome": "Ana Lima"}, "movimentacoes": {"periodo": "01/04/2026 até 30/06/2026"},
+             "thundera": thundera or {}, "outrasMovimentacoes": [{"tipo": tipo_om, "info": info}]}
+        with mock.patch("ia.extrair_dados_do_texto", return_value=d):
+            return ia.extrair_caso_via_ia(tipo, "A", "15/06/2026", "S", "resumo", hoje=HOJE)[0]
+
+    def test_ia_marca_a_evasao_de_cripto(self):
+        caso = self._rodar("Cripto", {"evasaoCripto": "Sem Rápida Evasão"})
+        self.assertEqual(caso.comp_evasao_cripto, "Sem Rápida Evasão")  # o que a IA devolveu vale
+        caso = self._rodar("Cripto")  # a IA não devolveu: lê a instrução da descrição
+        self.assertEqual(caso.comp_evasao_cripto, "Rápida Evasão")
+        caso = self._rodar("Cripto", info="Comprou R$200.000,00 e manteve")
+        self.assertEqual(caso.comp_evasao_cripto, "")
+
+    def test_nao_vale_fora_do_cripto_nem_sem_montante(self):
+        for tipo in ("Pessoa Física (PF)", "Pessoa Jurídica (PJ)", "NuInvest", "Under 18"):
+            self.assertEqual(self._rodar(tipo, {"evasaoCripto": "Rápida Evasão"}).comp_evasao_cripto, "", tipo)
+        self.assertEqual(self._rodar("Cripto", info="enviou com rápida evasão").comp_evasao_cripto, "")  # sem montante
+        self.assertEqual(self._rodar("Cripto", tipo_om="Saques").comp_evasao_cripto, "")  # não é cripto
+        self.assertEqual(self._rodar("Cripto", {"evasaoCripto": "Rápida Evasão"}, tipo_om="Saques").comp_evasao_cripto, "")
+
+
+class TestEvasaoBancaria(unittest.TestCase):
+    def test_normaliza_o_que_a_ia_devolve(self):
+        casos = {"Rápida Evasão": "Rápida Evasão", "Sem Rápida Evasão": "Sem Rápida Evasão",
+                 "Só Créditos (Sem Débitos)": "Só Créditos (Sem Débitos)", "só créditos": "Só Créditos (Sem Débitos)",
+                 "Só Débitos (Sem Créditos)": "Só Débitos (Sem Créditos)", "sem créditos": "Só Débitos (Sem Créditos)",
+                 "Evasão Parcial (Pequena Parcela nos Débitos)": "Evasão Parcial (Pequena Parcela nos Débitos)",
+                 "evasão parcial": "Evasão Parcial (Pequena Parcela nos Débitos)",
+                 "evadiu uma pequena parcela": "Evasão Parcial (Pequena Parcela nos Débitos)", "": "", None: ""}
+        for valor, esperado in casos.items():
+            self.assertEqual(ia._modo_timeline(valor), esperado, valor)
+
+    def test_schema_e_regra_em_todos_os_prompts(self):
+        from core import TIPOS_CASO
+        for tipo in TIPOS_CASO:
+            prompt = ia.prompt_para_tipo(tipo)
+            for trecho in ("Só Créditos (Sem Débitos)", "Só Débitos (Sem Créditos)",
+                           "Evasão Parcial (Pequena Parcela nos Débitos)", "TIMELINE DE TRANSFERÊNCIAS"):
+                self.assertIn(trecho, prompt, f"{tipo}: {trecho}")
+
+    def test_pipeline_aplica_o_modo_em_qualquer_tipo(self):
+        from core import TIPOS_CASO
+        for tipo in TIPOS_CASO:
+            for devolvido, esperado in (("Só Débitos", "Só Débitos (Sem Créditos)"),
+                                        ("Evasão Parcial", "Evasão Parcial (Pequena Parcela nos Débitos)"),
+                                        ("Rápida Evasão", "Rápida Evasão")):
+                d = {"kyc": {"nome": "Ana"}, "movimentacoes": {"totalCredito": "R$500.000,00", "totalDebito": "R$40.000,00"},
+                     "thundera": {"evasao": devolvido}}
+                with mock.patch("ia.extrair_dados_do_texto", return_value=d):
+                    caso, _ = ia.extrair_caso_via_ia(tipo, "A", "15/06/2026", "S", "resumo", hoje=HOJE)
+                self.assertEqual(caso.comp_evasao, esperado, f"{tipo}/{devolvido}")
 
 
 class TestAplicar(unittest.TestCase):
@@ -824,21 +1252,32 @@ class TestAplicar(unittest.TestCase):
 
 
 class TestCompletar(unittest.TestCase):
-    def test_pf_vazio_recebe_neutros(self):
+    def test_pf_vazio_fica_em_branco_sem_marcadores(self):
         caso = ia.completar_obrigatorios(Caso(numero_caso="t", tipo_caso="Pessoa Física (PF)"), HOJE)
-        for attr in ("nome_cliente", "idade", "cidade_estado", "ultima_atualizacao_cadastral", "registro_profissional"):
-            self.assertEqual(getattr(caso, attr), NEUTRO, attr)
-        self.assertEqual(caso.renda_presumida, "R$0,00")
-        self.assertEqual((caso.mov_total_credito, caso.mov_total_debito), ("R$0,00", "R$0,00"))
-        self.assertEqual((caso.mov_total_contrapartes_credito, caso.mov_total_contrapartes_debito), ("0", "0"))
+        for attr in ("nome_cliente", "idade", "cidade_estado", "ultima_atualizacao_cadastral",
+                     "registro_profissional", "renda_presumida", "mov_total_credito", "mov_total_debito",
+                     "mov_total_contrapartes_credito", "mov_total_contrapartes_debito"):
+            self.assertEqual(getattr(caso, attr), "", attr)
         self.assertEqual(caso.mov_periodo, "01/07/2026 até 01/09/2026")
 
-    def test_pj_vazio_recebe_neutros(self):
+    def test_pj_vazio_fica_em_branco_sem_marcadores(self):
         caso = ia.completar_obrigatorios(Caso(numero_caso="t", tipo_caso="Pessoa Jurídica (PJ)"), HOJE)
-        for attr in ("nome_empresa", "data_abertura", "ramo_atividade", "porte", "endereco"):
-            self.assertEqual(getattr(caso, attr), NEUTRO, attr)
-        self.assertEqual(caso.faturamento_presumido, "R$0,00")
+        for attr in ("nome_empresa", "data_abertura", "ramo_atividade", "porte", "endereco", "faturamento_presumido"):
+            self.assertEqual(getattr(caso, attr), "", attr)
         self.assertEqual(caso.nome_cliente, "")
+
+    def test_nenhum_marcador_em_lugar_nenhum(self):
+        for tipo in ("Pessoa Física (PF)", "Pessoa Jurídica (PJ)", "Cripto", "NuInvest", "Under 18"):
+            caso = ia.completar_obrigatorios(Caso(numero_caso="t", tipo_caso=tipo), HOJE)
+            texto = json.dumps(caso.to_dict(), ensure_ascii=False)
+            self.assertNotIn("Não informado", texto, tipo)
+            self.assertNotIn("R$0,00", texto, tipo)
+
+    def test_total_de_contrapartes_so_conta_as_descritas(self):
+        caso = Caso(numero_caso="t", tipo_caso="Pessoa Física (PF)")
+        caso.contrapartes_credito = [ia.ContraparteMovimentacao(nome="A"), ia.ContraparteMovimentacao(nome="B")]
+        ia.completar_obrigatorios(caso, HOJE)
+        self.assertEqual((caso.mov_total_contrapartes_credito, caso.mov_total_contrapartes_debito), ("2", ""))
 
     def test_nao_completa_campos_do_analista_nem_genero(self):
         caso = ia.completar_obrigatorios(Caso(numero_caso="t", tipo_caso="Pessoa Física (PF)"), HOJE)
