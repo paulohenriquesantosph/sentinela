@@ -478,6 +478,7 @@ CSS_TELA = {
     "modo": (452, "240px"),
     "ia": (554, "70px"),
     "banco": (638, "28px"),
+    "manual": (760, "28px"),
 }
 
 # Textos centralizados / alinhamentos dos widgets dentro dos cartões.

@@ -26,6 +26,7 @@ import streamlit as st
 import dossie_html
 import estilo
 import ia
+import manual
 import pdf_dossie
 from core import (
     Caso, Socio, ContraparteMovimentacao, OutraMovimentacao, ItemArredondamento, MensagemPix,
@@ -347,6 +348,7 @@ def tela_home() -> None:
     st.button("Banco de dossiês", type="secondary", key="home_banco",
               on_click=lambda: (setattr(ss, "caso_selecionado", None), setattr(ss, "banco_modo", ""),
                                 setattr(ss, "dossie_voltar", "banco"), ir_para("banco")))
+    botao_link("📖 Manual do usuário: como criar um dossiê", key="home_manual", on_click=ir_para, args=("manual",))
 
 
 # ---------------------------------------------------------------------------
@@ -639,7 +641,8 @@ def tela_formulario() -> None:
         if ss.get("f_hfraude") == "Sim":
             campo("Detalhes do histórico de fraude", "f_hfraude_d", obrig=True)
         campo("Outras informações relevantes", "f_outras_info", area=True, altura=120,
-              ph="Redes sociais, processos, compartilhamentos de dispositivo, entre outros")
+              ph="Uma informação por linha. Ex: redes sociais, processos, compartilhamento de dispositivo e, "
+                 "em NuInvest/Crypto, os dados específicos do caso")
 
     # ---- BLOCO 2.1 (PJ) ----
     if eh_pj:
@@ -1153,6 +1156,11 @@ def tela_banco() -> None:
     botao_voltar = st.button("← Voltar", key="banco_voltar", type="secondary", on_click=ir_para, args=("home",))
 
 
+def tela_manual() -> None:
+    manual.tela_manual()
+    botao_link("← Voltar", key="manual_voltar", on_click=ir_para, args=("home",))
+
+
 # ---------------------------------------------------------------------------
 # Roteamento
 # ---------------------------------------------------------------------------
@@ -1164,6 +1172,7 @@ TELAS = {
     "formulario": (tela_formulario, "formulario"),
     "dossie": (tela_dossie, "dossie"),
     "banco": (tela_banco, "banco"),
+    "manual": (tela_manual, "manual"),
 }
 _fn, _css = TELAS.get(ss.tela, TELAS["home"])
 estilo.aplicar_estilo(_css)
