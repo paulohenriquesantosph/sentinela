@@ -534,6 +534,78 @@ class TestPerguntasKYCSocios(unittest.TestCase):
         self.assertIn("só \"Sim\" ou \"Não\"", ia.SYSTEM_PROMPT_PJ)
 
 
+class TestFragmentacaoFracionamentoArredondamento(unittest.TestCase):
+    def test_detectores(self):
+        self.assertTrue(ia.menciona_fragmentacao("Houve fragmentação nos créditos."))
+        self.assertFalse(ia.menciona_fragmentacao("Poucas contrapartes."))
+        self.assertTrue(ia.menciona_fracionamento("alto fracionamento entre as contrapartes"))
+        self.assertTrue(ia.menciona_fracionamento("valores fracionados"))
+        self.assertTrue(ia.menciona_arredondamento_diverso("Diversas transações arredondadas nos créditos"))
+        self.assertTrue(ia.menciona_arredondamento_diverso("muitas transações em perfil de arredondamento de milhar"))
+        self.assertFalse(ia.menciona_arredondamento_diverso("84 transações de R$1.000,00 em arredondamento"))
+        self.assertFalse(ia.menciona_arredondamento_diverso("Diversas contrapartes e saques."))
+
+    def test_mensagem_traz_as_diretrizes(self):
+        m = ia.montar_mensagem_usuario("Fragmentação e alto fracionamento; diversas transações arredondadas.")
+        self.assertTrue(m.startswith("INVENÇÃO AUTORIZADA: NÃO\n"))
+        for linha in ("FRAGMENTAÇÃO: SIM", "FRACIONAMENTO ENTRE CONTRAPARTES: SIM", "ARREDONDAMENTO DIVERSO: SIM"):
+            self.assertIn(linha, m)
+        m = ia.montar_mensagem_usuario("Cliente com renda baixa.")
+        for linha in ("FRAGMENTAÇÃO: NÃO", "FRACIONAMENTO ENTRE CONTRAPARTES: NÃO", "ARREDONDAMENTO DIVERSO: NÃO"):
+            self.assertIn(linha, m)
+
+    def test_regras_no_prompt(self):
+        for trecho in ("fragmentação = ALTO número de contrapartes", "CADA contraparte enviou ou recebeu",
+                       "43 transações de R$1.000,00 nos créditos e 54 nos débitos", "prevalece sobre a regra 4"):
+            self.assertIn(trecho, ia.SYSTEM_PROMPT_PF)
+
+    def _caso(self, total_cp, pcts, ntrans, itens=()):
+        d = {"movimentacoes": {"periodo": "01/04/2026 até 30/06/2026", "totalCredito": "R$100.000,00",
+                               "totalDebito": "R$50.000,00", "totalContrapartesCredito": total_cp,
+                               "contrapartesCredito": [{"tipo": "Pessoa Física", "nome": f"C{i}", "porcentagem": p,
+                                                        "numTransacoes": ntrans} for i, p in enumerate(pcts)]},
+             "thundera": {"arredondamento": "Sim", "arredondamentoItens": list(itens)}}
+        return ia.aplicar_dados_extraidos(Caso(numero_caso="t", tipo_caso="Pessoa Física (PF)"), d, HOJE)
+
+    def test_fragmentacao_ok_nao_avisa(self):
+        caso = self._caso("120", ["6%", "5%", "4%"], "80")
+        self.assertEqual(ia.coerencia_extracao(caso, "fragmentação com alto fracionamento"), [])
+
+    def test_fragmentacao_com_poucas_contrapartes_ou_concentracao_avisa(self):
+        caso = self._caso("5", ["40%", "5%"], "10")
+        txt = " | ".join(ia.coerencia_extracao(caso, "fragmentação e alto fracionamento"))
+        self.assertIn("fragmentação, mas o total de contrapartes de crédito é 5", txt)
+        self.assertIn("20% ou mais", txt)
+        self.assertIn("menos de 20 transações", txt)
+
+    def test_fragmentacao_e_fracionamento_juntos(self):
+        txt = "Houve fragmentação e fracionamento nos créditos."
+        self.assertTrue(ia.menciona_fragmentacao(txt) and ia.menciona_fracionamento(txt))
+        m = ia.montar_mensagem_usuario(txt)
+        self.assertIn("FRAGMENTAÇÃO: SIM", m)
+        self.assertIn("FRACIONAMENTO ENTRE CONTRAPARTES: SIM", m)
+        self.assertIn("os DOIS comportamentos existem ao mesmo tempo", ia.SYSTEM_PROMPT_PF)
+        # só um dos termos não liga o outro
+        self.assertIn("FRACIONAMENTO ENTRE CONTRAPARTES: NÃO", ia.montar_mensagem_usuario("Houve fragmentação."))
+
+    def test_percentuais_diferentes_entre_si(self):
+        self.assertIn("DIFERENTES entre si", ia.SYSTEM_PROMPT_PF)
+        self.assertIn("NUNCA todas iguais", ia.SYSTEM_PROMPT_PF)
+        iguais = self._caso("120", ["8%", "8%", "8%"], "80")
+        self.assertIn("todas a mesma porcentagem (8%)", " ".join(ia.coerencia_extracao(iguais, "fragmentação")))
+        variadas = self._caso("120", ["7%", "5%", "3,5%"], "80")
+        self.assertEqual(ia.coerencia_extracao(variadas, "fragmentação"), [])
+
+    def test_arredondamento_acima_do_total_avisa(self):
+        itens = [{"credDeb": "Créditos", "quantidade": "43", "valor": "R$1.000,00"},
+                 {"credDeb": "Créditos", "quantidade": "20", "valor": "R$2.000,00"},
+                 {"credDeb": "Débitos", "quantidade": "54", "valor": "R$1.000,00"}]
+        caso = self._caso("10", ["10%"], "5", itens)
+        avisos = ia.coerencia_extracao(caso, "")  # créditos: 83.000 <= 100.000; débitos: 54.000 > 50.000
+        self.assertEqual(len(avisos), 1)
+        self.assertIn("arredondadas de débitos somam R$54.000,00", avisos[0])
+
+
 class TestAplicar(unittest.TestCase):
     def test_narrativa_mudanca_de_comportamento(self):
         caso = ia.aplicar_dados_extraidos(Caso(numero_caso="t", tipo_caso="Pessoa Física (PF)"), dados_joao(), HOJE)

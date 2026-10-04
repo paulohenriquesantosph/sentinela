@@ -108,6 +108,18 @@ formulário já preenchido para você revisar. Os campos da tela são:</p>
   <li><b>Período:</b> “de 01/06/2026 até 01/08/2026”. Sem período, o Sentinela usa um período padrão.</li>
   <li><b>Concentração:</b> se não houver menção a concentração, nenhuma contraparte passa de 50% do total.
       Se houver (“alta concentração em X”), a principal fica acima de 50%.</li>
+  <li><b>Fragmentação:</b> escreva “houve fragmentação” e o Sentinela coloca um <b>alto número de
+      contrapartes</b> (60 a 200, ou o número que você informar) e <b>não indica concentração</b> em nenhuma
+      delas: cada contraparte descrita fica com uma porcentagem baixa e <b>diferente</b> das outras.</li>
+  <li><b>Alto fracionamento entre as contrapartes:</b> o Sentinela entende que <b>cada contraparte</b> enviou
+      ou recebeu um <b>alto número de transações</b> (cerca de 30 a 150 cada). Se você escrever <b>fragmentação e fracionamento</b>, o Sentinela entende que os
+      <b>dois comportamentos</b> existem: muitas contrapartes e muitas transações em cada uma.</li>
+  <li><b>Transações arredondadas:</b> se você disser “diversas transações arredondadas” (ou termos
+      parecidos, como “muitas transações em perfil de arredondamento de milhar”) sem os números, o Sentinela
+      cria <b>várias linhas</b> em Arredondamento, uma por valor e por lado. Exemplo: 43 transações de
+      R$ 1.000,00 nos créditos e 54 nos débitos; 20 de R$ 2.000,00 nos créditos e 33 nos débitos; e assim
+      por diante. A soma de cada lado nunca passa do total do lado. Se você informar os números, ele usa os
+      seus.</li>
   <li><b>Termos vagos:</b> “diversas”, “várias” e “muitas” viram um número plausível (ex.: 12), nunca a
       palavra. Prefira dar o número real.</li>
   <li><b>Contrapartes aleatórias:</b> se quiser que o Sentinela crie o que faltar, escreva “aleatório”,

@@ -54,6 +54,7 @@ def _store() -> ArmazenamentoLocal:
 store = _store()
 ss = st.session_state
 
+URL_FEEDBACK = "https://forms.gle/z6sdUZawYvgf4fn3A"
 SIM_NAO = ["Não", "Sim"]
 GENEROS = {"": "", "Masculino": "M", "Feminino": "F"}
 
@@ -351,6 +352,7 @@ def tela_home() -> None:
               on_click=lambda: (setattr(ss, "caso_selecionado", None), setattr(ss, "banco_modo", ""),
                                 setattr(ss, "dossie_voltar", "banco"), ir_para("banco")))
     botao_link("📖 Manual do usuário: como criar um dossiê", key="home_manual", on_click=ir_para, args=("manual",))
+    estilo.link_externo("Formulário de Feedback e Sugestões", URL_FEEDBACK)
 
 
 # ---------------------------------------------------------------------------

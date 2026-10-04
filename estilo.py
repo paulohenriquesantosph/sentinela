@@ -298,18 +298,18 @@ h1,h2,h3,h4{ font-family:var(--serif) !important; color:var(--purple-deep) !impo
 [data-testid="stVerticalBlock"]:has(> [data-testid="element-container"] > .stHtml > .sx-sm) [data-testid^="stBaseButton"]:disabled{ box-shadow:none !important; }
 
 /* link discreto ("← Voltar"): o container que contém o marcador .sx-lnk */
-[data-testid="stVerticalBlock"]:has(> [data-testid="element-container"] > .stHtml > .sx-lnk) [data-testid^="stBaseButton"]{
+[data-testid="stVerticalBlock"]:has(> [data-testid="element-container"] > .stHtml > .sx-lnk) [data-testid^="stBaseButton"], [data-testid="stVerticalBlock"]:has(> [data-testid="element-container"] > .stHtml > .sx-lnk) [data-testid="stLinkButton"] a{
   background:transparent !important; border:none !important; box-shadow:none !important;
   color:var(--accent) !important; text-decoration:underline; text-underline-offset:3px;
   padding:2px 6px !important; transform:none !important;
 }
-[data-testid="stVerticalBlock"]:has(> [data-testid="element-container"] > .stHtml > .sx-lnk) [data-testid^="stBaseButton"] p{
+[data-testid="stVerticalBlock"]:has(> [data-testid="element-container"] > .stHtml > .sx-lnk) [data-testid^="stBaseButton"] p, [data-testid="stVerticalBlock"]:has(> [data-testid="element-container"] > .stHtml > .sx-lnk) [data-testid="stLinkButton"] a p{
   font-size:12px !important; text-transform:none !important; font-weight:500 !important; letter-spacing:.02em !important;
 }
-[data-testid="stVerticalBlock"]:has(> [data-testid="element-container"] > .stHtml > .sx-lnk) [data-testid^="stBaseButton"]:hover:not(:disabled){
+[data-testid="stVerticalBlock"]:has(> [data-testid="element-container"] > .stHtml > .sx-lnk) [data-testid^="stBaseButton"]:hover:not(:disabled), [data-testid="stVerticalBlock"]:has(> [data-testid="element-container"] > .stHtml > .sx-lnk) [data-testid="stLinkButton"] a:hover{
   background:transparent !important; color:var(--purple-deep) !important; box-shadow:none !important;
 }
-[data-testid="stVerticalBlock"]:has(> [data-testid="element-container"] > .stHtml > .sx-lnk) .stButton{ display:flex; justify-content:center; }
+[data-testid="stVerticalBlock"]:has(> [data-testid="element-container"] > .stHtml > .sx-lnk) .stButton, [data-testid="stVerticalBlock"]:has(> [data-testid="element-container"] > .stHtml > .sx-lnk) [data-testid="stLinkButton"]{ display:flex; justify-content:center; }
 
 /* botão compacto escuro "← Voltar ao Sentinela" do dossiê */
 [data-testid="stVerticalBlock"]:has(> [data-testid="element-container"] > .stHtml > .sx-topo) [data-testid^="stBaseButton"]{
@@ -676,6 +676,12 @@ def avatar_svg(genero: str) -> str:
                  '<rect x="11.9" y="20" width="3.6" height="9" rx="1.4" fill="#2A2035"/>')
     svg = f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 22 30">{corpo}</svg>'
     return f'<img class="sx-avatar" alt="" src="data:image/svg+xml;utf8,{quote(svg, safe="")}"/>'
+
+
+def link_externo(rotulo: str, url: str) -> None:
+    """Link clicável para um endereço externo (abre em nova aba), com o aspecto do link discreto."""
+    with variante("lnk"):
+        st.link_button(rotulo, url)
 
 
 def pilula(rotulo: str, valor: str, extra: str = "") -> str:

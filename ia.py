@@ -146,7 +146,11 @@ REGRAS (siga todas):
 13. KYC: registroSocietario = "Sim" só se o texto disser que o cliente tem registro societário; nesse caso preencha registroSocietarioDetalhes (razaoSocial, dataAbertura, situacaoCadastral, ramoAtividade) com o que o texto trouxer. Região de risco: se o texto indicar cidade/estado da região, coloque em cidadeEstado (PF); se o tipo for "Outras Regiões de Risco", descreva a região em descricaoRegiaoRisco. PEP: tipoPep e descricaoPep (cargo e carência). Mídia negativa, histórico de PLD e de fraude: detalhe (link, data e fonte, quando houver) em seus campos "...Detalhe". Nunca invente detalhes que o texto não traz (sem INVENÇÃO AUTORIZADA).
 14. outrasInformacoes: coloque aqui TODA informação adicional de KYC que o texto trouxer e que não tenha campo próprio (compartilhamento de dispositivo, redes sociais, processos, dados específicos de NuInvest/Crypto e outras informações não convencionais), UMA INFORMAÇÃO POR LINHA, separadas por quebra de linha, no formato "Rótulo: valor". Não repita o que já tem campo próprio.
 15. Contrapartes com sinais de KYC (sócia de empresa/registro societário, PEP, mídia negativa, histórico de PLD, histórico de fraude, região de risco): marque "Sim" no item de CADA contraparte envolvida e preencha o campo "...Detalhe" correspondente com o que o texto trouxer. Se o texto indicar MAIS DE UMA contraparte com o sinal (ex.: "3 contrapartes são PEP"), CRIE uma entrada por contraparte na lista (mesmo passando de 5 entradas), cada uma com o sinal marcado, mantendo valores e porcentagens coerentes com o total. Sem INVENÇÃO AUTORIZADA, deixe nome e demais dados dessas contrapartes em branco; com INVENÇÃO AUTORIZADA, crie-os respeitando a regra 12. Nunca invente os detalhes dos sinais.
-16. Saída: APENAS um objeto JSON válido, sem markdown, sem crases e sem texto antes ou depois.
+16. FRAGMENTAÇÃO (linha "FRAGMENTAÇÃO: SIM"): fragmentação = ALTO número de contrapartes. Coloque em totalContrapartesCredito e/ou totalContrapartesDebito um número alto (ex.: entre 60 e 200; use o número do texto, se houver) e NÃO indique concentração em nenhuma contraparte: as descritas ficam com porcentagens baixas e DIFERENTES entre si (ex.: 7%, 5%, 3,5%, 2%), NUNCA todas iguais nem todas no teto; nenhuma passa de cerca de 8% e nenhuma prevalece sobre as demais. Vale para os lados citados no texto (crédito, débito ou ambos, se não especificado). Esta regra prevalece sobre a regra 4.
+17. FRACIONAMENTO ENTRE CONTRAPARTES (linha "FRACIONAMENTO ENTRE CONTRAPARTES: SIM"): alto fracionamento = CADA contraparte enviou ou recebeu um ALTO número de transações. Em numTransacoes de TODAS as contrapartes descritas coloque números altos (ex.: entre 30 e 150 cada), em crédito e em débito, com valor médio por transação plausível (valor da contraparte / numTransacoes).
+17b. Se as linhas "FRAGMENTAÇÃO: SIM" e "FRACIONAMENTO ENTRE CONTRAPARTES: SIM" aparecerem JUNTAS, os DOIS comportamentos existem ao mesmo tempo: total alto de contrapartes (regra 16) E alto número de transações em cada contraparte descrita (regra 17).
+18. ARREDONDAMENTO DIVERSO (linha "ARREDONDAMENTO DIVERSO: SIM"): o texto fala em várias transações em valores arredondados/unidades de milhar sem dar os números. Crie VÁRIAS linhas em arredondamentoItens, uma por valor de referência e por lado (Créditos e Débitos), com "arredondamento": "Sim". Ex.: 43 transações de R$1.000,00 nos créditos e 54 nos débitos; 20 de R$2.000,00 nos créditos e 33 nos débitos; 9 de R$5.000,00 nos créditos e 12 nos débitos; e assim sucessivamente (valores de referência crescentes, quantidades altas e geralmente decrescentes). A soma (quantidade x valor) de cada lado nunca passa do total do lado. Se o texto trouxer os números, use os do texto.
+19. Saída: APENAS um objeto JSON válido, sem markdown, sem crases e sem texto antes ou depois.
 """
 
 _REGRAS_PJ = """
@@ -226,6 +230,29 @@ def validar_mudanca(data_conta: str, data_alerta: str, valor: str = "") -> Tuple
             "data_conta": (data_conta or "").strip(), "valor": (valor or "").strip()}, erros
 
 
+_RE_FRAGMENTACAO = re.compile(r"fragment")
+_RE_FRACIONAMENTO = re.compile(r"fraciona")
+_RE_ARRED = re.compile(r"arredond")
+_RE_ARRED_VAGO = re.compile(r"divers|vari[ao]s|mult[ao]s|muit[ao]s|alto\s+(?:numero|volume)|grande\s+(?:numero|volume)"
+                            r"|diversidade|recorrent|reiterad|frequent|sucessiv|inumer|inumeras|sistematic")
+
+
+def menciona_fragmentacao(texto: str) -> bool:
+    """Fragmentação = alto número de contrapartes, sem concentração em nenhuma delas."""
+    return bool(_RE_FRAGMENTACAO.search(_sem_acento(texto)))
+
+
+def menciona_fracionamento(texto: str) -> bool:
+    """Alto fracionamento entre as contrapartes = cada contraparte com um alto número de transações."""
+    return bool(_RE_FRACIONAMENTO.search(_sem_acento(texto)))
+
+
+def menciona_arredondamento_diverso(texto: str) -> bool:
+    """'Diversas transações arredondadas' e termos parecidos: a IA cria várias linhas de arredondamento."""
+    t = _sem_acento(texto)
+    return bool(_RE_ARRED.search(t) and _RE_ARRED_VAGO.search(t))
+
+
 def _menciona_concentracao(texto: str) -> bool:
     return "concentra" in _sem_acento(texto)
 
@@ -262,8 +289,12 @@ def montar_mensagem_usuario(texto: str, texto_outras_movimentacoes: str = "") ->
     e separados (resumo principal e outras movimentações não bancárias)."""
     outras = (texto_outras_movimentacoes or "").strip()
     invencao = autoriza_invencao(texto) or autoriza_invencao(outras)
+    sn = lambda v: "SIM" if v else "NÃO"  # noqa: E731
     return (
-        f"INVENÇÃO AUTORIZADA: {'SIM' if invencao else 'NÃO'}\n\n"
+        f"INVENÇÃO AUTORIZADA: {sn(invencao)}\n"
+        f"FRAGMENTAÇÃO: {sn(menciona_fragmentacao(texto))}\n"
+        f"FRACIONAMENTO ENTRE CONTRAPARTES: {sn(menciona_fracionamento(texto))}\n"
+        f"ARREDONDAMENTO DIVERSO: {sn(menciona_arredondamento_diverso(texto))}\n\n"
         "### RESUMO DO CASO\n" + (texto or "").strip() + "\n\n"
         "### OUTRAS MOVIMENTAÇÕES (NÃO BANCÁRIAS)\n" + (outras or "(vazio)")
     )
@@ -715,6 +746,8 @@ def coerencia_extracao(caso: Caso, texto: str = "", invencao_autorizada: Optiona
     avisos: List[str] = []
     invencao = autoriza_invencao(texto) if invencao_autorizada is None else invencao_autorizada
     concentracao = _menciona_concentracao(texto)
+    fragmentacao = menciona_fragmentacao(texto)
+    fracionamento = menciona_fracionamento(texto)
 
     for rotulo, lista, attr_total, attr_cont in (
         ("crédito", caso.contrapartes_credito, "mov_total_credito", "mov_total_contrapartes_credito"),
@@ -760,6 +793,25 @@ def coerencia_extracao(caso: Caso, texto: str = "", invencao_autorizada: Optiona
             setattr(caso, attr_cont, str(novo))
             avisos.append(f"O total de contrapartes de {rotulo} ({valor_cont}) era menor que o número de "
                           f"contrapartes descritas; foi ajustado para {novo}.")
+        # 3b) fragmentação e fracionamento (só avisa)
+        if fragmentacao and lista:
+            m = re.search(r"\d+", getattr(caso, attr_cont) or "")
+            n = int(m.group()) if m else 0
+            if n < 30:
+                avisos.append(f"O texto fala em fragmentação, mas o total de contrapartes de {rotulo} é {n or '—'}. "
+                              "Fragmentação pede um número alto de contrapartes. Confira.")
+            pcts_desc = [c.porcentagem.strip() for c in lista if (c.porcentagem or "").strip()]
+            if len(pcts_desc) >= 2 and len(set(pcts_desc)) == 1:
+                avisos.append(f"As contrapartes de {rotulo} têm todas a mesma porcentagem ({pcts_desc[0]}). "
+                              "Varie os percentuais entre elas.")
+            if any(parse_valor_br(c.porcentagem) >= 20.0 for c in lista):
+                avisos.append(f"O texto fala em fragmentação, mas há contraparte de {rotulo} com 20% ou mais do "
+                              "total (concentração). Confira os percentuais.")
+        if fracionamento:
+            baixas = [c for c in lista if _tem_digito(c.num_transacoes) and int(re.search(r"\d+", c.num_transacoes).group()) < 20]
+            if baixas:
+                avisos.append(f"O texto fala em alto fracionamento, mas {len(baixas)} contraparte(s) de {rotulo} "
+                              "têm menos de 20 transações. Confira o número de transações.")
         # 4) regra de concentração (só avisa)
         if not invencao and not concentracao:
             for c in lista:
@@ -767,6 +819,15 @@ def coerencia_extracao(caso: Caso, texto: str = "", invencao_autorizada: Optiona
                     avisos.append(
                         f"A contraparte de {rotulo} {c.nome or '(sem nome)'} tem {c.porcentagem} do total, mas o "
                         "texto não menciona concentração. Confira o percentual.")
+    # arredondamento: quantidade x valor não pode passar do total do lado
+    for rotulo_lado, cd, attr_total in (("créditos", "Créditos", "mov_total_credito"),
+                                        ("débitos", "Débitos", "mov_total_debito")):
+        total = parse_valor_br(getattr(caso, attr_total))
+        soma = sum(parse_valor_br(it.quantidade) * parse_valor_br(it.valor)
+                   for it in caso.arredondamento_itens if it.cred_deb == cd)
+        if total > 0 and soma > total:
+            avisos.append(f"As transações arredondadas de {rotulo_lado} somam {formatar_brl(soma)}, acima do total "
+                          f"de {rotulo_lado} ({formatar_brl(total)}). Confira quantidades e valores.")
     return avisos
 
 

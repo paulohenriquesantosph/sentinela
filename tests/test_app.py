@@ -235,6 +235,14 @@ class TestResolucaoEAvaliacao(BaseApp):
         self.assertTrue(c.scorecard_salvo_em)
 
 
+class TestHome(BaseApp):
+    def test_home_tem_links_do_manual_e_do_feedback(self):
+        at = self.app()
+        links = [(e.proto.label, e.proto.url) for e in at.get("link_button")]
+        self.assertEqual(links, [("Formulário de Feedback e Sugestões", "https://forms.gle/z6sdUZawYvgf4fn3A")])
+        self.assertIn("home_manual", [b.key for b in at.button])
+
+
 class TestIA(BaseApp):
     def test_preenchimento_automatico_leva_ao_formulario_com_dados(self):
         fake = FakeLLM()
