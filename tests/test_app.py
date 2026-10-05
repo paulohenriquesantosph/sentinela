@@ -6,6 +6,7 @@ Rodar, da raiz do projeto:
 Cobre: navegação, os 5 tipos de caso, validação de obrigatórios, sócios (PJ), responsável legal
 (Under 18), rubrica NuInvest, gênero ambíguo, preenchimento por IA (servidor fake) e o Banco.
 """
+import json
 import os
 import shutil
 import sys
@@ -18,6 +19,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import streamlit as st  # noqa: E402
 from streamlit.testing.v1 import AppTest  # noqa: E402
 
+import gravacao_sql  # noqa: E402
 from core import ArmazenamentoLocal, TIPOS_CASO  # noqa: E402
 from tests.test_ia import FakeLLM  # noqa: E402
 
@@ -340,6 +342,76 @@ class TestIA(BaseApp):
             self.clicar(at, "ia_preencher")
             self.assertEqual(at.session_state.tela, "preenchimento_ia")
             self.assertIn("401", at.session_state.ia_erro)
+
+
+class TestGravacaoNaBase(BaseApp):
+    """Ao GERAR o dossiê ele é gravado na base de casos (usr.sentinela_aml); Resolução e Avaliação não gravam."""
+
+    def _fake(self, falhar_em=None):
+        class Fake:
+            def __init__(self):
+                self.comandos = []
+                self.falhar_em = falhar_em
+
+            def __call__(self, sql, parametros):
+                self.comandos.append((sql, parametros))
+                if self.falhar_em and self.falhar_em in sql:
+                    raise gravacao_sql.ErroGravacao("warehouse indisponível")
+        return Fake()
+
+    def _gerar(self, at):
+        self.ir_para_formulario(at, 0)
+        self.preencher(at, f_nome="João Paulo Carvalho Dias", f_idade="28", f_renda="R$1.200,00")
+        self.preencher_bloco3(at)
+        self.clicar(at, "gerar_dossie")
+        return at.session_state.gerado_numero
+
+    def test_gera_e_grava_so_o_dossie(self):
+        fake = self._fake()
+        with mock.patch.dict(os.environ, {"SENTINELA_SQL_WAREHOUSE_ID": "wh1"}), \
+                mock.patch.object(gravacao_sql, "executor_databricks", return_value=fake):
+            at = self.app()
+            numero = self._gerar(at)
+            self.assertTrue(numero)
+            self.assertIn("INTO usr.sentinela_aml.casos ", fake.comandos[0][0])
+            linhas = json.loads(fake.comandos[0][1][0]["value"])
+            self.assertEqual((linhas[0]["numero_caso"], linhas[0]["tipo_caso"], linhas[0]["nome_cliente"]),
+                             (numero, "Pessoa Física (PF)", "João Paulo Carvalho Dias"))
+            self.assertIn("gravado também na base de casos (usr.sentinela_aml)", _html(at))
+            n = len(fake.comandos)
+            # Resolução e Avaliação NÃO gravam nada
+            self.clicar(at, "ver_dossie_gerado")
+            at.text_area(key=f"res_{numero}_parecer").set_value("Parecer.").run()
+            self.clicar(at, f"salvar_{numero}_parecer")
+            self.clicar(at, f"salvar_caso_{numero}")
+            self.assertEqual(len(fake.comandos), n)
+            self.assertEqual(self.store.carregar_caso(numero).parecer_final, "Parecer.")  # segue só nos arquivos
+
+    def test_sem_a_variavel_nada_e_enviado(self):
+        with mock.patch.dict(os.environ, {}), mock.patch.object(gravacao_sql, "executor_databricks") as exe:
+            os.environ.pop("SENTINELA_SQL_WAREHOUSE_ID", None)
+            at = self.app()
+            self.assertTrue(self._gerar(at))
+            exe.assert_not_called()
+            self.assertNotIn("base de casos", _html(at))
+
+    def test_falha_nao_derruba_o_dossie_e_permite_tentar_de_novo(self):
+        fake = self._fake(falhar_em="INTO usr.sentinela_aml.casos ")
+        with mock.patch.dict(os.environ, {"SENTINELA_SQL_WAREHOUSE_ID": "wh1"}), \
+                mock.patch.object(gravacao_sql, "executor_databricks", return_value=fake):
+            at = self.app()
+            numero = self._gerar(at)
+            self.assertTrue(numero)
+            self.assertTrue(self.store.carregar_caso(numero))  # o dossiê continua salvo no Banco de Dossiês
+            avisos = " ".join(w.value for w in at.warning)
+            self.assertIn("não foi possível gravá-lo na base de casos", avisos)
+            self.assertIn("regravar_sql", [b.key for b in at.button])
+            n = len(fake.comandos)
+            fake.falhar_em = None
+            self.clicar(at, "regravar_sql")
+            nova = fake.comandos[n:]
+            self.assertTrue(nova[0][0].startswith("DELETE"))  # limpa o que tenha entrado antes
+            self.assertIn("gravado também na base de casos", _html(at))
 
 
 class TestTimelineBancariaNoFormulario(BaseApp):

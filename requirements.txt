@@ -3,3 +3,4 @@ reportlab==4.2.5
 requests==2.32.3
 matplotlib==3.9.2
 numpy==2.1.1
+databricks-sdk==0.146.0

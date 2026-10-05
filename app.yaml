@@ -29,3 +29,16 @@ env:
   # (/v1/messages). Se omitido, o app escolhe automaticamente.
   # - name: "SENTINELA_LLM_FORMATO"
   #   value: "openai"
+
+  # --- Base de casos para consulta (opcional) -----------------------------
+  # Ao GERAR um dossie, ele tambem e gravado nas tabelas de usr.sentinela_aml
+  # (so o dossie: Resolucao e Avaliacao nao sao gravadas). Ative informando o
+  # SQL warehouse; sem esta variavel, o app funciona como antes (so arquivos).
+  # Se usar um recurso "SQL warehouse" do Databricks App, prefira valueFrom.
+  # - name: "SENTINELA_SQL_WAREHOUSE_ID"
+  #   value: "<id do SQL warehouse>"
+  # Catalogo/schema (padrao: usr / sentinela_aml):
+  # - name: "SENTINELA_SQL_CATALOGO"
+  #   value: "usr"
+  # - name: "SENTINELA_SQL_SCHEMA"
+  #   value: "sentinela_aml"

@@ -309,6 +309,11 @@ Origem dos recursos: transferências de terceiros via Pix</pre>
       para abrir o dossiê e o botão <b>Baixar PDF do dossiê</b>.</li>
 </ol>
 
+<p>Quando a base de casos está ativada, o dossiê também é <b>gravado para consulta</b> (por tipo de caso) assim
+que é gerado, e o Sentinela avisa. Só o dossiê é gravado: a Resolução do Caso e a Avaliação de Qualidade
+continuam sendo preenchidas aqui no app, durante a calibração. Se a gravação falhar, o dossiê continua salvo no
+Banco de Dossiês e você pode usar “Tentar gravar na base novamente”.</p>
+
 <h3>6. Trabalhar com o dossiê</h3>
 <p>O dossiê tem três abas:</p>
 <ul>

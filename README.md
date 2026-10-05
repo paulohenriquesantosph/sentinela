@@ -65,6 +65,60 @@ criá-lo (passo 5).
 
 ---
 
+## 3.1 Base de casos para consulta (Unity Catalog)
+
+Além dos arquivos do Banco de Dossiês, cada **dossiê gerado** pode ser gravado em tabelas Delta de
+**`usr.sentinela_aml`**, para que as pessoas consultem os casos (por tipo de caso) e os levem para calibrações com
+seus times. O esquema é gerado a partir do modelo do app (`core.py`) por `esquema_sql.py`.
+
+**Só o dossiê gerado é gravado** ("Informações do Caso": alerta, KYC, movimentações e comportamentos AML 360).
+**Resolução do Caso e Avaliação de Qualidade não são gravadas**: não existem nas tabelas e continuam sendo
+preenchidas dentro do app, na calibração. Salvar a Resolução ou a Avaliação depois não grava nada na base.
+
+| Tabela | Conteúdo |
+|---|---|
+| `casos` | uma linha por dossiê: campos do caso, colunas tipadas para análise (`*_valor`, `*_dt`) e o JSON do dossiê (`caso_json`) |
+| `contrapartes` | contrapartes principais de crédito/débito (Bloco 3), com o mini-KYC |
+| `socios` | sócios (caso PJ) |
+| `outras_movimentacoes` | saques, boletos, criptomoedas etc., com o montante extraído da descrição |
+| `arredondamentos`, `mensagens_pix` | comportamentos do Bloco 4 |
+| `timeline_diaria` | série diária dos gráficos (bancária e de criptomoedas) |
+
+As tabelas filhas ligam-se a `casos` por `numero_caso` e repetem `tipo_caso`, para filtrar por tipo sem JOIN.
+Há também **uma view por tipo de caso**, só com as colunas daquele tipo: `casos_pf`, `casos_pj`, `casos_cripto`,
+`casos_nuinvest` e `casos_under18`. Os campos de texto mantêm o nome e o texto do app (ex.: `mov_total_credito` =
+"R$500.000,00"); as versões numéricas têm sufixo `_valor` e as de data, `_dt`. Campos sem informação ficam `NULL`.
+
+```sql
+SELECT numero_caso, nome_cliente, fator_gerador, mov_total_credito FROM usr.sentinela_aml.casos_cripto ORDER BY criado_em DESC;
+SELECT * FROM usr.sentinela_aml.contrapartes WHERE tipo_caso = 'Cripto' AND numero_caso = '2026-ABC123';
+```
+
+**Como ativar a gravação pelo app:** defina `SENTINELA_SQL_WAREHOUSE_ID` no `app.yaml` (id do SQL warehouse; veja o
+bloco comentado). Sem ela, nada é enviado ao Databricks. Opcionais: `SENTINELA_SQL_CATALOGO` e
+`SENTINELA_SQL_SCHEMA` (padrão `usr` e `sentinela_aml`). Se a gravação falhar, o dossiê continua salvo no Banco
+de Dossiês, o app avisa o analista e oferece "Tentar gravar na base novamente". Os textos digitados pelos
+analistas vão ao Databricks como **parâmetros** da API, nunca dentro do comando SQL.
+
+O service principal do app precisa de permissão (rode como dono do schema):
+
+```sql
+GRANT USE CATALOG ON CATALOG usr TO `<service-principal-do-app>`;
+GRANT USE SCHEMA, SELECT, MODIFY ON SCHEMA usr.sentinela_aml TO `<service-principal-do-app>`;
+-- e "Can use" no SQL warehouse (Compute > SQL warehouses > Permissions)
+GRANT USE SCHEMA, SELECT ON SCHEMA usr.sentinela_aml TO `<grupo-que-vai-consultar>`;  -- quem só consulta
+```
+
+Para (re)criar as tabelas e views (usa `CREATE TABLE IF NOT EXISTS` e `CREATE OR REPLACE VIEW`: não apaga dados):
+
+```bash
+./venv/bin/python esquema_sql.py                      # só imprime o DDL
+./venv/bin/python esquema_sql.py --aplicar --warehouse <id-do-sql-warehouse> --perfil <perfil-do-databricks-cli>
+```
+
+Os testes `tests/test_esquema_sql.py` e `tests/test_gravacao_sql.py` falham se um campo novo do `Caso` ficar sem
+coluna/tabela (ou sem ser declarado "não gravado"), ou se algo de Resolução/Avaliação chegar às tabelas.
+
 ## 4. Configurar o acesso à IA (opcional)
 
 Necessário **apenas** para o botão "Preencher com Instruções (Automático)".

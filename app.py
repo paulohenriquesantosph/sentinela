@@ -25,6 +25,7 @@ import streamlit as st
 
 import dossie_html
 import estilo
+import gravacao_sql
 import ia
 import manual
 import pdf_dossie
@@ -72,6 +73,9 @@ DEFAULTS: Dict[str, Any] = {
     "ia_erro": "",
     "ia_pendente": None,
     "origem_ia": False,
+    "sql_pendente": None,
+    "sql_resultado": None,
+    "sql_limpar": False,
     "erros_form": [],
     "timeline": None,
     "timeline_cripto": None,
@@ -106,6 +110,8 @@ def limpar_formulario() -> None:
     ss.ia_avisos = []
     ss.ia_pendente = None
     ss.origem_ia = False
+    ss.sql_pendente = None
+    ss.sql_resultado = None
     ss.erros_form = []
 
 
@@ -691,6 +697,26 @@ def _gerar_dossie(tipo_caso: str) -> None:
     pdf_bytes = pdf_dossie.gerar_pdf(caso, "completo")
     store.salvar_caso(caso, pdf_bytes)
     ss.gerado_numero = caso.numero_caso
+    # Gravação do dossiê na base de casos (usr.sentinela_aml), feita na tela com um indicador de progresso.
+    # Só o dossiê gerado é gravado; salvar Resolução ou Avaliação depois não grava nada.
+    ss.sql_pendente = caso.numero_caso if gravacao_sql.configurado() else None
+    ss.sql_resultado = None
+    ss.sql_limpar = False
+
+
+def _regravar_sql(numero: str) -> None:
+    """Nova tentativa de gravar o dossiê na base (apaga antes o que tenha entrado numa falha parcial)."""
+    ss.sql_pendente = numero
+    ss.sql_limpar = True
+
+
+def _gravar_na_base(caso: Caso) -> None:
+    """Grava o dossiê na base de casos e guarda o resultado para mostrar ao analista."""
+    with st.spinner("Gravando o dossiê na base de casos…"):
+        status, msg = gravacao_sql.gravar_se_configurado(caso, limpar=bool(ss.get("sql_limpar")))
+    ss.sql_pendente = None
+    ss.sql_limpar = False
+    ss.sql_resultado = {"numero": caso.numero_caso, "status": status, "msg": msg}
 
 
 def _bloco_resp_legal() -> None:
@@ -921,6 +947,17 @@ def tela_formulario() -> None:
         caso = store.carregar_caso(numero)
         if caso:
             estilo.msg_ok(f"Dossiê {numero} salvo no Banco de Dossiês.")
+            if ss.get("sql_pendente") == numero:
+                _gravar_na_base(caso)
+            res = ss.get("sql_resultado")
+            if res and res["numero"] == numero:
+                if res["status"] == "ok":
+                    estilo.msg_ok(f"Dossiê gravado também na base de casos ({res['msg']}), disponível para consulta.")
+                elif res["status"] == "erro":
+                    st.warning("O dossiê foi salvo no Banco de Dossiês, mas não foi possível gravá-lo na base de "
+                               f"casos: {res['msg']}")
+                    st.button("Tentar gravar na base novamente", key="regravar_sql", type="secondary",
+                              on_click=_regravar_sql, args=(numero,))
             st.button(f"\U0001F4C4 Clique aqui para ver o dossiê {numero}", key="ver_dossie_gerado", type="primary",
                       on_click=ver_dossie, args=(numero, "formulario"))
             pdf = store.carregar_pdf(numero)
