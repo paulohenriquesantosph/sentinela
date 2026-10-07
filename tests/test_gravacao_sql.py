@@ -237,6 +237,17 @@ class TestSeConfigurado(unittest.TestCase):
             self.assertEqual(g.gravar_se_configurado(caso_completo()), ("erro", "sem credencial"))
 
 
+    def test_erro_vira_uma_linha_curta_com_a_tabela(self):
+        longo = "[TABLE_OR_VIEW_NOT_FOUND] tabela não encontrada\n" + "stack " * 100
+        self.assertEqual(g.resumir_erro(longo), "[TABLE_OR_VIEW_NOT_FOUND] tabela não encontrada")
+        self.assertLessEqual(len(g.resumir_erro("x" * 500)), 160)
+        ex = ExecutorFalso(falhar_em="INTO usr.sentinela_aml.casos ")
+        with self.assertRaises(g.ErroGravacao) as ctx:
+            g.gravar_caso(caso_completo(), ex)
+        self.assertTrue(str(ctx.exception).startswith("casos: "))
+        self.assertNotIn("\n", str(ctx.exception))
+
+
 class TestMigracao(unittest.TestCase):
     def setUp(self):
         import shutil

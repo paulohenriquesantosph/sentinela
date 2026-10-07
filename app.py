@@ -958,6 +958,9 @@ def tela_formulario() -> None:
                                f"casos: {res['msg']}")
                     st.button("Tentar gravar na base novamente", key="regravar_sql", type="secondary",
                               on_click=_regravar_sql, args=(numero,))
+            elif not gravacao_sql.configurado():
+                st.info("O dossiê NÃO foi gravado na base de casos: a gravação está desativada neste ambiente "
+                        "(SENTINELA_SQL_WAREHOUSE_ID não definida).")
             st.button(f"\U0001F4C4 Clique aqui para ver o dossiê {numero}", key="ver_dossie_gerado", type="primary",
                       on_click=ver_dossie, args=(numero, "formulario"))
             pdf = store.carregar_pdf(numero)

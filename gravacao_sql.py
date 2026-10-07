@@ -70,6 +70,13 @@ def _inteiro(v: Any) -> Optional[int]:
     return int(m.group()) if m else None
 
 
+def resumir_erro(erro: Any, limite: int = 160) -> str:
+    """Erro em uma linha curta para mostrar ao analista (a 1ª linha da mensagem, sem espaços repetidos)."""
+    linhas = [l.strip() for l in str(erro).splitlines() if l.strip()]
+    texto = re.sub(r"\s+", " ", linhas[0] if linhas else type(erro).__name__)
+    return texto if len(texto) <= limite else texto[:limite - 1].rstrip() + "…"
+
+
 def dossie_sem_resolucao(caso: core.Caso) -> core.Caso:
     """Cópia do caso com Resolução do Caso e Avaliação de Qualidade em branco (só o dossiê é gravado)."""
     copia = core.Caso.from_dict(caso.to_dict())
@@ -199,7 +206,10 @@ def gravar_caso(caso: core.Caso, executar: Executor, catalogo: str = esquema_sql
     if limpar:  # nova tentativa depois de falha parcial: apaga o que já tinha entrado
         for tabela in reversed(esquema_sql.TABELAS):
             executar(*comando_delete(tabela, caso.numero_caso, catalogo, schema))
-    executar(*comando_insert("casos", linhas["casos"], catalogo, schema))  # primeiro o caso; depois as filhas
+    try:  # primeiro o caso; depois as filhas
+        executar(*comando_insert("casos", linhas["casos"], catalogo, schema))
+    except Exception as e:  # noqa: BLE001
+        raise ErroGravacao(f"casos: {resumir_erro(e)}") from e
     filhas = [t for t in esquema_sql.TABELAS[1:] if linhas[t]]
     erros: List[str] = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, min(6, len(filhas)))) as pool:
@@ -208,7 +218,7 @@ def gravar_caso(caso: core.Caso, executar: Executor, catalogo: str = esquema_sql
             try:
                 futuro.result()
             except Exception as e:  # noqa: BLE001
-                erros.append(f"{futuros[futuro]}: {e}")
+                erros.append(f"{futuros[futuro]}: {resumir_erro(e)}")
     if erros:
         raise ErroGravacao("; ".join(sorted(erros)))
     return {t: len(linhas[t]) for t in esquema_sql.TABELAS if linhas[t]}
@@ -257,7 +267,7 @@ def gravar_se_configurado(caso: core.Caso, limpar: bool = False) -> Tuple[str, s
         gravar_caso(caso, executar, catalogo, schema, limpar=limpar)
         return "ok", f"{catalogo}.{schema}"
     except Exception as e:  # noqa: BLE001 - a gravação na base nunca pode derrubar o app
-        return "erro", str(e)[:400]
+        return "erro", resumir_erro(e)
 
 
 # ---------------------------------------------------------------------------

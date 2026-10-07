@@ -393,7 +393,8 @@ class TestGravacaoNaBase(BaseApp):
             at = self.app()
             self.assertTrue(self._gerar(at))
             exe.assert_not_called()
-            self.assertNotIn("base de casos", _html(at))
+            self.assertTrue(any("NÃO foi gravado na base de casos" in i.value for i in at.info))
+            self.assertNotIn("gravado também na base de casos", _html(at))
 
     def test_falha_nao_derruba_o_dossie_e_permite_tentar_de_novo(self):
         fake = self._fake(falhar_em="INTO usr.sentinela_aml.casos ")
