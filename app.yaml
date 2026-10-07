@@ -35,8 +35,8 @@ env:
   # (so o dossie: Resolucao e Avaliacao nao sao gravadas). Ative informando o
   # SQL warehouse; sem esta variavel, o app funciona como antes (so arquivos).
   # Se usar um recurso "SQL warehouse" do Databricks App, prefira valueFrom.
-  # - name: "SENTINELA_SQL_WAREHOUSE_ID"
-  #   value: "<id do SQL warehouse>"
+  - name: "SENTINELA_SQL_WAREHOUSE_ID"
+    valueFrom: "sql-warehouse"
   # Catalogo/schema (padrao: usr / sentinela_aml):
   # - name: "SENTINELA_SQL_CATALOGO"
   #   value: "usr"
