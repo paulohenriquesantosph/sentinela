@@ -1389,7 +1389,8 @@ def tela_banco() -> None:
         modo = ""
     resultados: List[Dict[str, Any]] = []
     if modo == "busca":
-        resultados = store.buscar_por_numero(termo)
+        trecho = termo.lower()
+        resultados = [i for i in _casos_salvos() if trecho in str(i.get("numero_caso", "")).lower()]
         if not resultados:
             estilo.vazio(f'Nenhum caso encontrado com o número "{termo}". Verifique o número digitado ou use '
                          '"Consultar banco de dados completo".')

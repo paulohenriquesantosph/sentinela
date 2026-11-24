@@ -433,6 +433,17 @@ class TestGravacaoNaBase(BaseApp):
             self.assertIn("abrir_2026-SO-NA-BASE", chaves)
             self.assertEqual(chaves.count(f"abrir_{numero}"), 1)  # sem duplicar o que está nos dois lugares
 
+    def test_busca_por_numero_encontra_caso_que_so_esta_na_base(self):
+        linhas = [["2026-SO-NA-BASE", "Maria da Base", "Cripto", "2099-01-01T10:00:00"]]
+        with mock.patch.dict(os.environ, {"SENTINELA_SQL_WAREHOUSE_ID": "wh1"}), \
+                mock.patch.object(gravacao_sql, "consultor_databricks", return_value=lambda sql, p: linhas):
+            at = self.app()
+            at.session_state.tela = "banco"
+            at.run()
+            at.text_input(key="banco_termo").set_value("so-na").run()
+            self.clicar(at, "banco_buscar")
+            self.assertIn("abrir_2026-SO-NA-BASE", [b.key for b in at.button])
+
     def test_banco_completo_cai_para_os_arquivos_se_a_base_falhar(self):
         fake = self._fake()
         with mock.patch.dict(os.environ, {"SENTINELA_SQL_WAREHOUSE_ID": "wh1"}), \
