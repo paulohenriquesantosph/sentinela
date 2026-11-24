@@ -248,8 +248,25 @@ def _executar_statement(warehouse_id: str, perfil: Optional[str], sql: str, para
 
 @functools.lru_cache(maxsize=4)
 def _cliente_databricks(perfil: Optional[str] = None) -> Any:
+    """Cliente do Databricks com o PAT configurado para o app; fora dele, aceita um perfil de CLI.
+
+    Sem a variável do token, lê o PAT do segredo `SENTINELA_TOKEN_SECRET` ("scope/chave") com o service principal
+    do app. Sem token e sem perfil, informa a configuração ausente. Reinicie o processo após trocar o segredo,
+    pois o cliente é mantido em cache.
+    """
     from databricks.sdk import WorkspaceClient
-    return WorkspaceClient(profile=perfil) if perfil else WorkspaceClient()
+    token = os.environ.get("SENTINELA_DATABRICKS_TOKEN", "").strip()
+    origem = os.environ.get("SENTINELA_TOKEN_SECRET", "").strip()  # "scope/chave", lido pelo service principal do app
+    if not token and origem and not perfil:
+        import base64
+        scope, _, chave = origem.partition("/")
+        valor = WorkspaceClient().secrets.get_secret(scope=scope, key=chave).value or ""
+        token = base64.b64decode(valor).decode().strip()
+    if token:
+        return WorkspaceClient(host=os.environ["DATABRICKS_HOST"], token=token, auth_type="pat")
+    if perfil:
+        return WorkspaceClient(profile=perfil)
+    raise RuntimeError("SENTINELA_DATABRICKS_TOKEN não configurado.")
 
 
 @functools.lru_cache(maxsize=4)
