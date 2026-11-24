@@ -6,7 +6,7 @@ command:
 env:
   # Caminho do Volume do Unity Catalog onde os dossies e PDFs ficam salvos.
   - name: "SENTINELA_DATA_DIR"
-    value: "/Volumes/main/sentinela/dossies"
+    value: "/Volumes/usr/sentinela_aml/dossies"
 
   # --- Configuracao da IA (opcional) -------------------------------------
   # Necessaria apenas para o preenchimento automatico. Remova os blocos
