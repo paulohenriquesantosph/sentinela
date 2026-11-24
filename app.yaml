@@ -15,7 +15,6 @@ env:
   # Credencial: key da Anthropic (sk-ant-...) OU key do proxy LiteLLM.
   - name: "ANTHROPIC_API_KEY"
     valueFrom: "anthropic-api-key"
-
   # Endereco do servico: gateway LiteLLM do Nubank (conforme o manual, secao 13).
   # REMOVA esta linha se for usar a API da Anthropic direta.
   - name: "ANTHROPIC_BASE_URL"
@@ -34,9 +33,18 @@ env:
   # Ao GERAR um dossie, ele tambem e gravado nas tabelas de usr.sentinela_aml
   # (so o dossie: Resolucao e Avaliacao nao sao gravadas). Ative informando o
   # SQL warehouse; sem esta variavel, o app funciona como antes (so arquivos).
-  # Se usar um recurso "SQL warehouse" do Databricks App, prefira valueFrom.
+  # Usa o mesmo warehouse do Rizoma, com PAT vindo do segredo do Sentinela.
   - name: "SENTINELA_SQL_WAREHOUSE_ID"
-    valueFrom: "sql-warehouse"
+    value: "9922922d3546fdd3"
+  - name: "DATABRICKS_HOST"
+    value: "https://nubank-e2-general.cloud.databricks.com"
+  # PAT do Danilo no scope sentinela_sql; o service principal do app tem READ nele.
+  - name: "SENTINELA_TOKEN_SECRET"
+    value: "sentinela_sql/databricks-token"
+  - name: "SENTINELA_SQL_CATALOGO"
+    value: "usr"
+  - name: "SENTINELA_SQL_SCHEMA"
+    value: "sentinela_aml"
   # Catalogo/schema (padrao: usr / sentinela_aml):
   # - name: "SENTINELA_SQL_CATALOGO"
   #   value: "usr"
