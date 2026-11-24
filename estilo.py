@@ -547,10 +547,10 @@ def caixa(estado: str = "pend") -> Iterator[None]:
 
 def titulo_cartao(eyebrow: str, titulo: str, descricao: str = "", sub: str = "",
                   carimbo: str = "", pequeno: bool = False, subtitulo_forte: str = "",
-                  descricao_normal: str = "") -> None:
+                  descricao_normal: str = "", classe_titulo: str = "") -> None:
     """Cabeçalho das telas de cartão: eyebrow, título dourado com sombra, subtítulo,
     descrição em caixa-alta e carimbo rotacionado."""
-    t = "sx-title sx-title-sm" if pequeno else "sx-title"
+    t = ("sx-title sx-title-sm" if pequeno else "sx-title") + (f" {classe_titulo}" if classe_titulo else "")
     partes = [f'<div class="sx-eyebrow">{escape(eyebrow)}</div>',
               f'<div class="{t}">{escape(titulo)}</div>']
     if subtitulo_forte:
@@ -574,6 +574,7 @@ CSS_TITULOS = """
   text-transform:uppercase; color:var(--gold); text-shadow:3px 3px 0 var(--purple-soft), 6px 6px 0 var(--home-black);
 }
 .sx-title-sm{ font-size:34px; margin-top:12px; text-shadow:2px 2px 0 var(--purple-soft), 4px 4px 0 var(--home-black); }
+.sx-title-banco{ font-size:44px; text-shadow:3px 3px 0 var(--purple-soft), 5px 5px 0 var(--home-black); }
 .sx-sub-forte{ font-family:var(--mono); font-weight:700; font-size:14px; color:var(--accent); margin-top:14px; letter-spacing:.05em; text-transform:uppercase; }
 .sx-sub{ font-family:var(--mono); font-weight:600; font-size:13px; color:var(--accent); margin-top:10px; letter-spacing:.04em; text-transform:uppercase; }
 .sx-desc{ font-family:var(--mono); margin:20px auto 0; max-width:390px; line-height:1.7; font-size:12.5px; color:var(--accent); text-transform:uppercase; }

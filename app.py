@@ -1367,7 +1367,8 @@ def _casos_salvos() -> List[Dict[str, Any]]:
 
 
 def tela_banco() -> None:
-    estilo.titulo_cartao("Gerador de Casos - Calibração", "BANCO DE DOSSIÊS", pequeno=True)
+    estilo.titulo_cartao("Gerador de Casos - Calibração", "BANCO DE DOSSIÊS", pequeno=True,
+                         classe_titulo="sx-title-banco")
     c1, c2 = st.columns([4, 1.1], vertical_alignment="bottom")
     with c1:
         campo("Consultar por número do caso", "banco_termo", ph="Ex: 2026-3E1DFA", on_change=_buscar)
