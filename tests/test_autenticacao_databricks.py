@@ -6,6 +6,10 @@ Rodar, da raiz do projeto:
 
 Todas as credenciais abaixo são fictícias. O ambiente é isolado e nenhum
 WorkspaceClient real é criado, mesmo nos testes de falha de autenticação.
+
+O cliente do Databricks é criado sob demanda (`_cliente_databricks`), no primeiro
+comando SQL executado, e não ao obter o executor. Por isso os testes executam um
+comando antes de verificar qual credencial foi usada.
 """
 import os
 import sys
@@ -29,8 +33,9 @@ ENV_TOKEN = "SENTINELA_DATABRICKS_TOKEN"
 
 class TestAutenticacaoDatabricks(unittest.TestCase):
     def setUp(self):
-        g.executor_databricks.cache_clear()
-        self.addCleanup(g.executor_databricks.cache_clear)
+        for funcao in (g.executor_databricks, g.consultor_databricks, g._cliente_databricks):
+            funcao.cache_clear()
+            self.addCleanup(funcao.cache_clear)
 
         ambiente = mock.patch.dict(os.environ, {"DATABRICKS_HOST": HOST}, clear=True)
         ambiente.start()
@@ -51,6 +56,11 @@ class TestAutenticacaoDatabricks(unittest.TestCase):
     def _confirmar_cliente_pat(self):
         self.workspace.assert_called_once_with(host=HOST, token=TOKEN, auth_type="pat")
 
+    def _executar_comando(self, perfil=None):
+        """Obtém o executor e roda um comando, o que cria o cliente do Databricks."""
+        executar = g.executor_databricks(WAREHOUSE, perfil)
+        executar("SELECT 1", [])
+
     def test_pat_explicito_prevalece_sobre_perfil_e_oauth_do_ambiente(self):
         os.environ.update({
             ENV_TOKEN: TOKEN,
@@ -59,11 +69,10 @@ class TestAutenticacaoDatabricks(unittest.TestCase):
             "DATABRICKS_AUTH_TYPE": "oauth-m2m",
         })
 
-        executar = g.executor_databricks(WAREHOUSE, PERFIL)
+        self._executar_comando(PERFIL)
 
-        self.assertTrue(callable(executar))
         self._confirmar_cliente_pat()
-        self.executar_statement.assert_not_called()
+        self.executar_statement.assert_called_once()
 
     def test_token_lido_do_segredo_pelo_service_principal(self):
         import base64
@@ -71,30 +80,28 @@ class TestAutenticacaoDatabricks(unittest.TestCase):
         self.cliente.secrets.get_secret.return_value = SimpleNamespace(
             value=base64.b64encode(TOKEN.encode()).decode())
 
-        executar = g.executor_databricks(WAREHOUSE)
+        self._executar_comando()
 
-        self.assertTrue(callable(executar))
         self.cliente.secrets.get_secret.assert_called_once_with(scope="scope-ficticio", key="chave-ficticia")
         self.assertEqual(self.workspace.call_args_list,
                          [mock.call(), mock.call(host=HOST, token=TOKEN, auth_type="pat")])
 
     def test_perfil_explicito_sem_token(self):
-        executar = g.executor_databricks(WAREHOUSE, PERFIL)
+        self._executar_comando(PERFIL)
 
-        self.assertTrue(callable(executar))
         self.workspace.assert_called_once_with(profile=PERFIL)
-        self.executar_statement.assert_not_called()
+        self.executar_statement.assert_called_once()
 
     def test_perfil_explicito_com_token_em_branco(self):
         os.environ[ENV_TOKEN] = " \t\n "
 
-        g.executor_databricks(WAREHOUSE, PERFIL)
+        self._executar_comando(PERFIL)
 
         self.workspace.assert_called_once_with(profile=PERFIL)
 
     def test_sem_token_nem_perfil_falha_sem_criar_cliente(self):
         with self.assertRaises(RuntimeError):
-            g.executor_databricks(WAREHOUSE)
+            self._executar_comando()
 
         self.workspace.assert_not_called()
         self.executar_statement.assert_not_called()
@@ -103,7 +110,7 @@ class TestAutenticacaoDatabricks(unittest.TestCase):
         os.environ[ENV_TOKEN] = " \t\n "
 
         with self.assertRaises(RuntimeError):
-            g.executor_databricks(WAREHOUSE)
+            self._executar_comando()
 
         self.workspace.assert_not_called()
         self.executar_statement.assert_not_called()
@@ -114,7 +121,7 @@ class TestAutenticacaoDatabricks(unittest.TestCase):
         self.workspace.side_effect = erro
 
         with self.assertRaises(RuntimeError) as ctx:
-            g.executor_databricks(WAREHOUSE, PERFIL)
+            self._executar_comando(PERFIL)
 
         self.assertIs(ctx.exception, erro)
         self._confirmar_cliente_pat()
