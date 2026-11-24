@@ -19,12 +19,13 @@ Ver README.md para publicar no Databricks.
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import streamlit as st
 
 import dossie_html
 import estilo
+import armazenamento_volume
 import gravacao_sql
 import ia
 import manual
@@ -50,11 +51,11 @@ st.set_page_config(page_title="Sentinela PLD", page_icon="\U0001F6E1️", layout
 
 
 @st.cache_resource
-def _store() -> ArmazenamentoLocal:
-    return ArmazenamentoLocal()
+def _store() -> Tuple[Any, str]:
+    return armazenamento_volume.criar_armazenamento()
 
 
-store = _store()
+store, AVISO_ARMAZENAMENTO = _store()
 ss = st.session_state
 
 URL_FEEDBACK = "https://forms.gle/z6sdUZawYvgf4fn3A"
@@ -949,6 +950,8 @@ def tela_formulario() -> None:
         caso = store.carregar_caso(numero)
         if caso:
             estilo.msg_ok(f"Dossiê {numero} salvo no Banco de Dossiês.")
+            if AVISO_ARMAZENAMENTO:
+                st.warning(AVISO_ARMAZENAMENTO)
             if ss.get("sql_pendente") == numero:
                 _gravar_na_base(caso)
             res = ss.get("sql_resultado")
@@ -1369,6 +1372,8 @@ def _casos_salvos() -> List[Dict[str, Any]]:
 def tela_banco() -> None:
     estilo.titulo_cartao("Gerador de Casos - Calibração", "BANCO DE DOSSIÊS", pequeno=True,
                          classe_titulo="sx-title-banco")
+    if AVISO_ARMAZENAMENTO:
+        st.warning(AVISO_ARMAZENAMENTO)
     c1, c2 = st.columns([4, 1.1], vertical_alignment="bottom")
     with c1:
         campo("Consultar por número do caso", "banco_termo", ph="Ex: 2026-3E1DFA", on_change=_buscar)

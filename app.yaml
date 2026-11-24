@@ -4,9 +4,15 @@ command:
   - "app.py"
 
 env:
-  # Caminho do Volume do Unity Catalog onde os dossies e PDFs ficam salvos.
+  # Pasta local (reserva): usada so se o Volume abaixo estiver inacessivel.
   - name: "SENTINELA_DATA_DIR"
     value: "/tmp/sentinela"
+
+  # Banco de Dossies no Volume do Unity Catalog, pela API de arquivos (o Databricks Apps nao enxerga
+  # /Volumes como pasta). O service principal do app precisa de READ/WRITE VOLUME. Se o Volume estiver
+  # inacessivel, o app usa SENTINELA_DATA_DIR (pasta local, apagada ao reiniciar) e mostra um aviso.
+  - name: "SENTINELA_VOLUME_DOSSIES"
+    value: "/Volumes/usr/sentinela_aml/dossies"
 
   # --- Configuracao da IA (opcional) -------------------------------------
   # Necessaria apenas para o preenchimento automatico. Remova os blocos
