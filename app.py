@@ -76,6 +76,7 @@ DEFAULTS: Dict[str, Any] = {
     "sql_pendente": None,
     "sql_resultado": None,
     "sql_limpar": False,
+    "dossie_base": None,
     "erros_form": [],
     "timeline": None,
     "timeline_cripto": None,
@@ -133,6 +134,7 @@ def ver_dossie(numero: str, voltar_para: str) -> None:
         guardar_formulario()
     ss.caso_selecionado = numero
     ss.dossie_voltar = voltar_para
+    ss.dossie_base = None  # o dossiê é lido da base de novo a cada abertura
     ir_para("dossie")
 
 
@@ -1292,6 +1294,13 @@ def _esc(texto: str) -> str:
 def tela_dossie() -> None:
     numero = ss.get("caso_selecionado")
     caso = store.carregar_caso(numero) if numero else None
+    # "Informações do Caso" vêm da base de casos; Resolução e Avaliação só existem nos arquivos
+    if numero and (not ss.get("dossie_base") or ss.dossie_base["numero"] != numero):
+        status, da_base, msg = gravacao_sql.carregar_se_configurado(numero)
+        ss.dossie_base = {"numero": numero, "status": status, "caso": da_base, "msg": msg}
+    base = ss.get("dossie_base") or {"status": "desativado", "caso": None, "msg": ""}
+    if not caso and base["status"] == "ok":
+        caso = base["caso"]  # caso que só existe na base: Resolução e Avaliação começam em branco
     if not caso:
         estilo.msg_erro("Caso não encontrado.")
         st.button("← Voltar ao Banco de Dossiês", key="dossie_nao_achou", type="secondary",
@@ -1301,7 +1310,15 @@ def tela_dossie() -> None:
     st.html(dossie_html.cabecalho_html(caso))
     aba1, aba2, aba3 = st.tabs(["Informações do Caso", "Resolução do Caso", "Avaliação de Qualidade"])
     with aba1:
-        for h in dossie_html.informacoes_html(caso):
+        if base["status"] == "ok":
+            st.caption(f"Dossiê lido da base de casos ({base['msg']}).")
+        elif base["status"] == "nao_encontrado":
+            st.warning(f"Este caso não está na base de casos ({base['msg']}); exibindo o dossiê salvo no Banco de "
+                       "Dossiês.")
+        elif base["status"] == "erro":
+            st.warning(f"Não foi possível ler o dossiê da base de casos ({base['msg']}); exibindo o dossiê salvo "
+                       "no Banco de Dossiês.")
+        for h in dossie_html.informacoes_html(base["caso"] if base["status"] == "ok" else caso):
             st.html(h)
     with aba2:
         _aba_resolucao(caso)
@@ -1333,6 +1350,22 @@ def _consultar_tudo() -> None:
     ss.caso_selecionado = None
 
 
+def _casos_salvos() -> List[Dict[str, Any]]:
+    """Todos os dossiês salvos: os da base de casos (se configurada) e os do Banco de Dossiês em arquivos."""
+    arquivos = store.listar_indice()
+    status, da_base, msg = gravacao_sql.listar_se_configurado()
+    if status == "erro":
+        st.warning(f"Não foi possível consultar a base de casos ({msg}); exibindo só os dossiês do Banco de Dossiês.")
+    if status != "ok":
+        return arquivos
+    por_numero = {i["numero_caso"]: i for i in arquivos}
+    lista = [{**por_numero.get(i["numero_caso"], {}), **{k: v for k, v in i.items() if v}} for i in da_base]
+    na_base = {i["numero_caso"] for i in da_base}
+    lista += [i for i in arquivos if i["numero_caso"] not in na_base]
+    lista.sort(key=lambda i: i.get("criado_em", ""), reverse=True)
+    return lista
+
+
 def tela_banco() -> None:
     estilo.titulo_cartao("Gerador de Casos - Calibração", "BANCO DE DOSSIÊS", pequeno=True)
     c1, c2 = st.columns([4, 1.1], vertical_alignment="bottom")
@@ -1355,7 +1388,7 @@ def tela_banco() -> None:
             estilo.vazio(f'Nenhum caso encontrado com o número "{termo}". Verifique o número digitado ou use '
                          '"Consultar banco de dados completo".')
     elif modo == "tudo":
-        resultados = store.listar_indice()
+        resultados = _casos_salvos()
         if not resultados:
             estilo.vazio("Nenhum dossiê salvo ainda. Gere um caso para ele aparecer aqui.")
     else:

@@ -41,6 +41,8 @@ ENV_PERFIL = "SENTINELA_SQL_PERFIL"
 
 # (comando SQL, parâmetros nomeados [{"name": ..., "value": ..., "type": "STRING"}]) -> executa ou levanta ErroGravacao
 Executor = Callable[[str, List[Dict[str, str]]], None]
+# (comando SQL, parâmetros) -> linhas do resultado
+Consultor = Callable[[str, List[Dict[str, str]]], List[List[Optional[str]]]]
 
 
 class ErroGravacao(Exception):
@@ -228,31 +230,56 @@ def gravar_caso(caso: core.Caso, executar: Executor, catalogo: str = esquema_sql
 # Databricks (SDK) e integração com o app
 # ---------------------------------------------------------------------------
 
+def _executar_statement(warehouse_id: str, perfil: Optional[str], sql: str, parametros: List[Dict[str, str]]) -> Any:
+    """Roda um comando no SQL warehouse e devolve a resposta; levanta ErroGravacao se não terminar com sucesso."""
+    from databricks.sdk.service.sql import (ExecuteStatementRequestOnWaitTimeout, StatementParameterListItem,
+                                            StatementState)
+    resp = _cliente_databricks(perfil).statement_execution.execute_statement(
+        warehouse_id=warehouse_id, statement=sql, wait_timeout="50s",
+        on_wait_timeout=ExecuteStatementRequestOnWaitTimeout.CANCEL,
+        parameters=[StatementParameterListItem(name=p["name"], value=p["value"], type=p.get("type", "STRING"))
+                    for p in parametros] or None)
+    estado = resp.status.state if resp.status else None
+    if estado != StatementState.SUCCEEDED:
+        erro = resp.status.error.message if resp.status and resp.status.error else None
+        raise ErroGravacao(erro or f"o comando terminou com estado {getattr(estado, 'value', estado)}")
+    return resp
+
+
+@functools.lru_cache(maxsize=4)
+def _cliente_databricks(perfil: Optional[str] = None) -> Any:
+    from databricks.sdk import WorkspaceClient
+    return WorkspaceClient(profile=perfil) if perfil else WorkspaceClient()
+
+
 @functools.lru_cache(maxsize=4)
 def executor_databricks(warehouse_id: str, perfil: Optional[str] = None) -> Executor:
     """Executor que roda os comandos num SQL warehouse pelo Databricks SDK (no Databricks Apps a autenticação
     é automática; fora dele, use `SENTINELA_SQL_PERFIL` com um perfil do Databricks CLI)."""
-    from databricks.sdk import WorkspaceClient
-    from databricks.sdk.service.sql import (ExecuteStatementRequestOnWaitTimeout, StatementParameterListItem,
-                                            StatementState)
-    cliente = WorkspaceClient(profile=perfil) if perfil else WorkspaceClient()
-
     def executar(sql: str, parametros: List[Dict[str, str]]) -> None:
-        resp = cliente.statement_execution.execute_statement(
-            warehouse_id=warehouse_id, statement=sql, wait_timeout="50s",
-            on_wait_timeout=ExecuteStatementRequestOnWaitTimeout.CANCEL,
-            parameters=[StatementParameterListItem(name=p["name"], value=p["value"], type=p.get("type", "STRING"))
-                        for p in parametros] or None)
-        estado = resp.status.state if resp.status else None
-        if estado != StatementState.SUCCEEDED:
-            erro = resp.status.error.message if resp.status and resp.status.error else None
-            raise ErroGravacao(erro or f"o comando terminou com estado {getattr(estado, 'value', estado)}")
+        _executar_statement(warehouse_id, perfil, sql, parametros)
 
     return executar
 
 
+@functools.lru_cache(maxsize=4)
+def consultor_databricks(warehouse_id: str, perfil: Optional[str] = None) -> Consultor:
+    """Como o executor, mas devolve as linhas do resultado (cada valor como texto, ou None)."""
+    def consultar(sql: str, parametros: List[Dict[str, str]]) -> List[List[Optional[str]]]:
+        resp = _executar_statement(warehouse_id, perfil, sql, parametros)
+        return [list(l) for l in (resp.result.data_array if resp.result and resp.result.data_array else [])]
+
+    return consultar
+
+
 def configurado() -> bool:
     return bool(os.environ.get(ENV_WAREHOUSE, "").strip())
+
+
+def _destino() -> Tuple[str, str]:
+    catalogo = os.environ.get(ENV_CATALOGO, esquema_sql.CATALOGO).strip() or esquema_sql.CATALOGO
+    schema = os.environ.get(ENV_SCHEMA, esquema_sql.SCHEMA).strip() or esquema_sql.SCHEMA
+    return catalogo, schema
 
 
 def gravar_se_configurado(caso: core.Caso, limpar: bool = False) -> Tuple[str, str]:
@@ -260,14 +287,65 @@ def gravar_se_configurado(caso: core.Caso, limpar: bool = False) -> Tuple[str, s
     'desativado' (nada a fazer), 'ok' ou 'erro'. Nunca levanta exceção."""
     if not configurado():
         return "desativado", ""
-    catalogo = os.environ.get(ENV_CATALOGO, esquema_sql.CATALOGO).strip() or esquema_sql.CATALOGO
-    schema = os.environ.get(ENV_SCHEMA, esquema_sql.SCHEMA).strip() or esquema_sql.SCHEMA
+    catalogo, schema = _destino()
     try:
         executar = executor_databricks(os.environ[ENV_WAREHOUSE].strip(), os.environ.get(ENV_PERFIL) or None)
         gravar_caso(caso, executar, catalogo, schema, limpar=limpar)
         return "ok", f"{catalogo}.{schema}"
     except Exception as e:  # noqa: BLE001 - a gravação na base nunca pode derrubar o app
         return "erro", resumir_erro(e)
+
+
+# ---------------------------------------------------------------------------
+# Leitura do dossiê a partir da base
+# ---------------------------------------------------------------------------
+
+def carregar_caso_da_base(numero_caso: str, consultar: Consultor, catalogo: str = esquema_sql.CATALOGO,
+                          schema: str = esquema_sql.SCHEMA) -> Optional[core.Caso]:
+    """Dossiê gravado em `casos.caso_json` (sem Resolução e Avaliação), ou None se o caso não está na base."""
+    linhas = consultar(f"SELECT caso_json FROM {catalogo}.{schema}.casos WHERE numero_caso = :numero_caso LIMIT 1",
+                       [{"name": "numero_caso", "value": numero_caso, "type": "STRING"}])
+    if not linhas or not linhas[0] or not linhas[0][0]:
+        return None
+    return core.Caso.from_dict(json.loads(linhas[0][0]))
+
+
+def carregar_se_configurado(numero_caso: str) -> Tuple[str, Optional[core.Caso], str]:
+    """Lê o dossiê da base se ela estiver configurada. Devolve (status, caso, mensagem), com status
+    'desativado', 'ok', 'nao_encontrado' ou 'erro'. Nunca levanta exceção."""
+    if not configurado():
+        return "desativado", None, ""
+    catalogo, schema = _destino()
+    try:
+        consultar = consultor_databricks(os.environ[ENV_WAREHOUSE].strip(), os.environ.get(ENV_PERFIL) or None)
+        caso = carregar_caso_da_base(numero_caso, consultar, catalogo, schema)
+    except Exception as e:  # noqa: BLE001 - a leitura da base nunca pode derrubar o app
+        return "erro", None, resumir_erro(e)
+    if caso is None:
+        return "nao_encontrado", None, f"{catalogo}.{schema}"
+    return "ok", caso, f"{catalogo}.{schema}"
+
+
+def listar_casos_da_base(consultar: Consultor, catalogo: str = esquema_sql.CATALOGO,
+                         schema: str = esquema_sql.SCHEMA) -> List[Dict[str, Any]]:
+    """Casos gravados na base, do mais recente para o mais antigo (mesmas chaves do índice do Banco de Dossiês)."""
+    linhas = consultar(f"SELECT numero_caso, nome_cliente, tipo_caso, criado_em FROM {catalogo}.{schema}.casos "
+                       "ORDER BY criado_em DESC, numero_caso DESC", [])
+    return [{"numero_caso": l[0], "nome_cliente": l[1] or "", "tipo_caso": l[2] or "", "criado_em": l[3] or ""}
+            for l in linhas if l and l[0]]
+
+
+def listar_se_configurado() -> Tuple[str, List[Dict[str, Any]], str]:
+    """Lista os casos da base se ela estiver configurada. Devolve (status, casos, mensagem), com status
+    'desativado', 'ok' ou 'erro'. Nunca levanta exceção."""
+    if not configurado():
+        return "desativado", [], ""
+    catalogo, schema = _destino()
+    try:
+        consultar = consultor_databricks(os.environ[ENV_WAREHOUSE].strip(), os.environ.get(ENV_PERFIL) or None)
+        return "ok", listar_casos_da_base(consultar, catalogo, schema), f"{catalogo}.{schema}"
+    except Exception as e:  # noqa: BLE001 - a leitura da base nunca pode derrubar o app
+        return "erro", [], resumir_erro(e)
 
 
 # ---------------------------------------------------------------------------

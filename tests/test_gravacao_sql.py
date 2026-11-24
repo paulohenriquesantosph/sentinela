@@ -301,5 +301,67 @@ class TestMigracao(unittest.TestCase):
         self.assertIn("falhou A", rel["2026-A"]["erro"])
 
 
+class TestLeituraDaBase(unittest.TestCase):
+    def test_carrega_o_dossie_gravado_em_caso_json(self):
+        caso = caso_completo()
+        json_gravado = g.linhas_do_caso(caso)["casos"][0]["caso_json"]
+        chamadas = []
+
+        def consultar(sql, parametros):
+            chamadas.append((sql, parametros))
+            return [[json_gravado]]
+
+        lido = g.carregar_caso_da_base(caso.numero_caso, consultar, "cat", "sch")
+        self.assertEqual((lido.numero_caso, lido.nome_cliente), (caso.numero_caso, "Marina Costa"))
+        self.assertIn("FROM cat.sch.casos WHERE numero_caso = :numero_caso", chamadas[0][0])
+        self.assertEqual(chamadas[0][1][0]["value"], caso.numero_caso)  # o número vai como parâmetro
+
+    def test_caso_fora_da_base(self):
+        self.assertIsNone(g.carregar_caso_da_base("2026-1", lambda sql, p: []))
+        self.assertIsNone(g.carregar_caso_da_base("2026-1", lambda sql, p: [[None]]))
+
+    def test_se_configurado(self):
+        with mock.patch.dict(os.environ, {}):
+            os.environ.pop(g.ENV_WAREHOUSE, None)
+            with mock.patch.object(g, "consultor_databricks") as cons:
+                self.assertEqual(g.carregar_se_configurado("2026-1"), ("desativado", None, ""))
+                cons.assert_not_called()
+        env = {g.ENV_WAREHOUSE: "wh1", g.ENV_CATALOGO: "cat", g.ENV_SCHEMA: "sch"}
+        json_gravado = g.linhas_do_caso(caso_completo())["casos"][0]["caso_json"]
+        with mock.patch.dict(os.environ, env):
+            with mock.patch.object(g, "consultor_databricks", return_value=lambda sql, p: [[json_gravado]]):
+                status, caso, msg = g.carregar_se_configurado("2026-TESTE1")
+                self.assertEqual((status, caso.nome_cliente, msg), ("ok", "Marina Costa", "cat.sch"))
+            with mock.patch.object(g, "consultor_databricks", return_value=lambda sql, p: []):
+                self.assertEqual(g.carregar_se_configurado("2026-1"), ("nao_encontrado", None, "cat.sch"))
+            with mock.patch.object(g, "consultor_databricks", side_effect=RuntimeError("sem credencial")):
+                self.assertEqual(g.carregar_se_configurado("2026-1"), ("erro", None, "sem credencial"))
+
+    def test_lista_os_casos_da_base(self):
+        chamadas = []
+
+        def consultar(sql, parametros):
+            chamadas.append(sql)
+            return [["2026-2", "Ana", "Cripto", "2026-10-05T10:00:00"], ["2026-1", None, None, None], [None]]
+
+        casos = g.listar_casos_da_base(consultar, "cat", "sch")
+        self.assertEqual([c["numero_caso"] for c in casos], ["2026-2", "2026-1"])
+        self.assertEqual(casos[0]["nome_cliente"], "Ana")
+        self.assertEqual(casos[1]["tipo_caso"], "")
+        self.assertIn("FROM cat.sch.casos", chamadas[0])
+
+    def test_listar_se_configurado(self):
+        with mock.patch.dict(os.environ, {}):
+            os.environ.pop(g.ENV_WAREHOUSE, None)
+            self.assertEqual(g.listar_se_configurado(), ("desativado", [], ""))
+        env = {g.ENV_WAREHOUSE: "wh1", g.ENV_CATALOGO: "cat", g.ENV_SCHEMA: "sch"}
+        with mock.patch.dict(os.environ, env):
+            with mock.patch.object(g, "consultor_databricks", return_value=lambda sql, p: [["2026-1", "Ana", "PF", "x"]]):
+                status, casos, msg = g.listar_se_configurado()
+                self.assertEqual((status, len(casos), msg), ("ok", 1, "cat.sch"))
+            with mock.patch.object(g, "consultor_databricks", side_effect=RuntimeError("sem acesso")):
+                self.assertEqual(g.listar_se_configurado(), ("erro", [], "sem acesso"))
+
+
 if __name__ == "__main__":
     unittest.main()

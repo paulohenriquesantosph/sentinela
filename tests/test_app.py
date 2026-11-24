@@ -387,6 +387,68 @@ class TestGravacaoNaBase(BaseApp):
             self.assertEqual(len(fake.comandos), n)
             self.assertEqual(self.store.carregar_caso(numero).parecer_final, "Parecer.")  # segue só nos arquivos
 
+    def test_botao_do_dossie_mostra_o_que_esta_na_base(self):
+        fake = self._fake()
+        with mock.patch.dict(os.environ, {"SENTINELA_SQL_WAREHOUSE_ID": "wh1"}), \
+                mock.patch.object(gravacao_sql, "executor_databricks", return_value=fake):
+            at = self.app()
+            numero = self._gerar(at)
+            caso_base = self.store.carregar_caso(numero)
+            caso_base.nome_cliente = "Nome vindo da base"
+            consultar = mock.Mock(return_value=[[json.dumps(caso_base.to_dict(), ensure_ascii=False)]])
+            with mock.patch.object(gravacao_sql, "consultor_databricks", return_value=consultar):
+                self.clicar(at, "ver_dossie_gerado")
+            self.assertEqual(consultar.call_args[0][1][0]["value"], numero)
+            html = _html(at)
+            self.assertIn("Nome vindo da base", html)
+            self.assertIn("Dossiê lido da base de casos (usr.sentinela_aml)", " ".join(c.value for c in at.caption))
+
+    def test_dossie_cai_para_os_arquivos_se_a_base_falhar(self):
+        fake = self._fake()
+        with mock.patch.dict(os.environ, {"SENTINELA_SQL_WAREHOUSE_ID": "wh1"}), \
+                mock.patch.object(gravacao_sql, "executor_databricks", return_value=fake):
+            at = self.app()
+            numero = self._gerar(at)
+            with mock.patch.object(gravacao_sql, "consultor_databricks", side_effect=RuntimeError("sem acesso")):
+                self.clicar(at, "ver_dossie_gerado")
+            self.assertIn("Não foi possível ler o dossiê da base de casos (sem acesso)",
+                          " ".join(w.value for w in at.warning))
+            self.assertIn("João Paulo Carvalho Dias", _html(at))
+
+    def test_banco_completo_lista_os_casos_da_base(self):
+        fake = self._fake()
+        with mock.patch.dict(os.environ, {"SENTINELA_SQL_WAREHOUSE_ID": "wh1"}), \
+                mock.patch.object(gravacao_sql, "executor_databricks", return_value=fake):
+            at = self.app()
+            numero = self._gerar(at)
+        linhas = [["2026-SO-NA-BASE", "Maria da Base", "Cripto", "2099-01-01T10:00:00"],
+                  [numero, "João Paulo Carvalho Dias", "Pessoa Física (PF)", "2026-10-05T10:00:00"]]
+        with mock.patch.dict(os.environ, {"SENTINELA_SQL_WAREHOUSE_ID": "wh1"}), \
+                mock.patch.object(gravacao_sql, "consultor_databricks", return_value=lambda sql, p: linhas):
+            at = self.app()
+            at.session_state.tela = "banco"
+            at.run()
+            self.clicar(at, "banco_tudo")
+            chaves = [b.key for b in at.button]
+            self.assertIn("abrir_2026-SO-NA-BASE", chaves)
+            self.assertEqual(chaves.count(f"abrir_{numero}"), 1)  # sem duplicar o que está nos dois lugares
+
+    def test_banco_completo_cai_para_os_arquivos_se_a_base_falhar(self):
+        fake = self._fake()
+        with mock.patch.dict(os.environ, {"SENTINELA_SQL_WAREHOUSE_ID": "wh1"}), \
+                mock.patch.object(gravacao_sql, "executor_databricks", return_value=fake):
+            at = self.app()
+            numero = self._gerar(at)
+        with mock.patch.dict(os.environ, {"SENTINELA_SQL_WAREHOUSE_ID": "wh1"}), \
+                mock.patch.object(gravacao_sql, "consultor_databricks", side_effect=RuntimeError("sem acesso")):
+            at = self.app()
+            at.session_state.tela = "banco"
+            at.run()
+            self.clicar(at, "banco_tudo")
+            self.assertIn(f"abrir_{numero}", [b.key for b in at.button])
+            self.assertIn("Não foi possível consultar a base de casos (sem acesso)",
+                          " ".join(w.value for w in at.warning))
+
     def test_sem_a_variavel_nada_e_enviado(self):
         with mock.patch.dict(os.environ, {}), mock.patch.object(gravacao_sql, "executor_databricks") as exe:
             os.environ.pop("SENTINELA_SQL_WAREHOUSE_ID", None)
