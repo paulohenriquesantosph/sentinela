@@ -1,0 +1,176 @@
+{
+ "kyc": {
+  "nome": "Carlos Eduardo Mendes",
+  "idade": "42",
+  "cidadeEstado": "Foz do Iguaçu/PR",
+  "ultimaAtualizacaoCadastral": "",
+  "profissaoInformada": "Comerciante",
+  "rendaPresumida": "R$3.500,00",
+  "registroProfissional": "Sem registro profissional",
+  "registroSocietario": "Sim",
+  "registroSocietarioDetalhes": {
+   "razaoSocial": "",
+   "dataAbertura": "",
+   "situacaoCadastral": "",
+   "ramoAtividade": "Serviços Combinados de Escritório"
+  },
+  "regiaoRisco": "Sim",
+  "tipoRegiaoRisco": "Região de Fronteira",
+  "descricaoRegiaoRisco": "",
+  "pep": "Sim",
+  "tipoPep": "PEP Relacionado",
+  "descricaoPep": "Irmão de vereador, carência até 2027",
+  "historicoPld": "Sim",
+  "historicoPldDetalhe": "Reporte ao COAF em 2024 por movimentação atípica",
+  "historicoFraude": "Sim",
+  "historicoFraudeDetalhe": "Conta cancelada por fraude em 2023",
+  "midiaNegativa": "Sim",
+  "midiaNegativaDetalhe": "Contrabando, G1, 10/03/2025",
+  "outrasInformacoes": "Compartilha dispositivo com outra conta"
+ },
+ "movimentacoes": {
+  "periodo": "01/01/2026 até 30/06/2026",
+  "totalCredito": "R$450.000,00",
+  "totalContrapartesCredito": "12",
+  "totalDebito": "R$430.000,00",
+  "totalContrapartesDebito": "2",
+  "contrapartesCredito": [
+   {
+    "tipo": "Pessoa Física",
+    "nome": "Marcos Andrade",
+    "idade": "34",
+    "cidadeEstado": "Recife/PE",
+    "rendaPresumida": "R$1.900,00",
+    "registroProfissional": "",
+    "porcentagem": "14%",
+    "valor": "R$63.000,00",
+    "numTransacoes": "9",
+    "registroSocietario": "Não",
+    "regiaoRisco": "Não",
+    "pep": "Sim",
+    "pepDetalhe": "",
+    "historicoPld": "Não",
+    "historicoFraude": "Não",
+    "midiaNegativa": "Não"
+   },
+   {
+    "tipo": "Pessoa Física",
+    "nome": "Fernanda Lopes",
+    "idade": "41",
+    "cidadeEstado": "Curitiba/PR",
+    "rendaPresumida": "R$2.400,00",
+    "registroProfissional": "",
+    "porcentagem": "11%",
+    "valor": "R$49.500,00",
+    "numTransacoes": "7",
+    "registroSocietario": "Não",
+    "regiaoRisco": "Não",
+    "pep": "Não",
+    "pepDetalhe": "",
+    "historicoPld": "Não",
+    "historicoFraude": "Não",
+    "midiaNegativa": "Não"
+   },
+   {
+    "tipo": "Pessoa Física",
+    "nome": "Rafael Souza",
+    "idade": "26",
+    "cidadeEstado": "Manaus/AM",
+    "rendaPresumida": "R$1.500,00",
+    "registroProfissional": "",
+    "porcentagem": "9%",
+    "valor": "R$40.500,00",
+    "numTransacoes": "6",
+    "registroSocietario": "Não",
+    "regiaoRisco": "Não",
+    "pep": "Não",
+    "pepDetalhe": "",
+    "historicoPld": "Não",
+    "historicoFraude": "Não",
+    "midiaNegativa": "Não"
+   }
+  ],
+  "contrapartesDebito": [
+   {
+    "tipo": "Pessoa Jurídica",
+    "nome": "Horizonte Comércio Ltda",
+    "dataAbertura": "12/03/2015",
+    "cidadeEstado": "Goiânia/GO",
+    "ramoAtividade": "Comércio varejista",
+    "porte": "Microempresa (ME)",
+    "faturamentoPresumido": "R$300.000,00",
+    "porcentagem": "60%",
+    "valor": "R$258.000,00",
+    "numTransacoes": "14",
+    "registroSocietario": "Não",
+    "regiaoRisco": "Não",
+    "pep": "Não",
+    "historicoPld": "Não",
+    "historicoFraude": "Não",
+    "midiaNegativa": "Não"
+   },
+   {
+    "tipo": "Pessoa Jurídica",
+    "nome": "Nova Era Transportes Ltda",
+    "dataAbertura": "20/07/2010",
+    "cidadeEstado": "Joinville/SC",
+    "ramoAtividade": "Transporte de cargas",
+    "porte": "Pequeno Porte (EPP)",
+    "faturamentoPresumido": "R$2.000.000,00",
+    "porcentagem": "40%",
+    "valor": "R$172.000,00",
+    "numTransacoes": "9",
+    "registroSocietario": "Não",
+    "regiaoRisco": "Não",
+    "pep": "Não",
+    "historicoPld": "Não",
+    "historicoFraude": "Não",
+    "midiaNegativa": "Não"
+   }
+  ]
+ },
+ "thundera": {
+  "arredondamento": "Sim",
+  "arredondamentoItens": [
+   {
+    "credDeb": "Créditos",
+    "quantidade": "43",
+    "valor": "R$1.000,00"
+   },
+   {
+    "credDeb": "Débitos",
+    "quantidade": "54",
+    "valor": "R$1.000,00"
+   },
+   {
+    "credDeb": "Créditos",
+    "quantidade": "20",
+    "valor": "R$2.000,00"
+   },
+   {
+    "credDeb": "Débitos",
+    "quantidade": "33",
+    "valor": "R$2.000,00"
+   }
+  ],
+  "pix": "Sim",
+  "pixItens": [
+   {
+    "credDeb": "Créditos",
+    "quantidade": "12",
+    "mensagem": "pagamento mercadoria"
+   },
+   {
+    "credDeb": "Créditos",
+    "quantidade": "8",
+    "mensagem": "ajuda"
+   }
+  ],
+  "evasao": "Rápida Evasão",
+  "mudancaComportamento": {
+   "houve": "Sim",
+   "valorAproximado": ""
+  },
+  "dataAberturaContaUltimoReporte": ""
+ }
+}

@@ -1,0 +1,46 @@
+{
+ "thundera": {
+  "arredondamento": "Sim",
+  "arredondamentoItens": [
+   {
+    "credDeb": "Créditos",
+    "quantidade": "43",
+    "valor": "R$1.000,00"
+   },
+   {
+    "credDeb": "Débitos",
+    "quantidade": "54",
+    "valor": "R$1.000,00"
+   },
+   {
+    "credDeb": "Créditos",
+    "quantidade": "20",
+    "valor": "R$2.000,00"
+   },
+   {
+    "credDeb": "Débitos",
+    "quantidade": "33",
+    "valor": "R$2.000,00"
+   }
+  ],
+  "pix": "Sim",
+  "pixItens": [
+   {
+    "credDeb": "Créditos",
+    "quantidade": "12",
+    "mensagem": "pagamento mercadoria"
+   },
+   {
+    "credDeb": "Créditos",
+    "quantidade": "8",
+    "mensagem": "ajuda"
+   }
+  ],
+  "evasao": "Rápida Evasão",
+  "mudancaComportamento": {
+   "houve": "Sim",
+   "valorAproximado": ""
+  },
+  "dataAberturaContaUltimoReporte": ""
+ }
+}

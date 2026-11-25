@@ -1,0 +1,31 @@
+{
+ "kyc": {
+  "nome": "Carlos Eduardo Mendes",
+  "idade": "42",
+  "cidadeEstado": "Foz do Iguaçu/PR",
+  "ultimaAtualizacaoCadastral": "",
+  "profissaoInformada": "Comerciante",
+  "rendaPresumida": "R$3.500,00",
+  "registroProfissional": "Sem registro profissional",
+  "registroSocietario": "Sim",
+  "registroSocietarioDetalhes": {
+   "razaoSocial": "",
+   "dataAbertura": "",
+   "situacaoCadastral": "",
+   "ramoAtividade": "Serviços Combinados de Escritório"
+  },
+  "regiaoRisco": "Sim",
+  "tipoRegiaoRisco": "Região de Fronteira",
+  "descricaoRegiaoRisco": "",
+  "pep": "Sim",
+  "tipoPep": "PEP Relacionado",
+  "descricaoPep": "Irmão de vereador, carência até 2027",
+  "historicoPld": "Sim",
+  "historicoPldDetalhe": "Reporte ao COAF em 2024 por movimentação atípica",
+  "historicoFraude": "Sim",
+  "historicoFraudeDetalhe": "Conta cancelada por fraude em 2023",
+  "midiaNegativa": "Sim",
+  "midiaNegativaDetalhe": "Contrabando, G1, 10/03/2025",
+  "outrasInformacoes": "Compartilha dispositivo com outra conta"
+ }
+}
