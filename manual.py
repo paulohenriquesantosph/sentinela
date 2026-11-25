@@ -32,8 +32,9 @@ MANUAL_HTML = """
       (por exemplo, PJ pede dados da empresa e dos sócios; Under 18 pede o responsável legal).</li>
   <li><b>Etapa 2 de 2:</b> escolha como preencher:
     <ul>
-      <li><b>Preencher com instruções (automático):</b> você informa nome do alerta, data, sentença e cola um
-          resumo do caso; o Sentinela tenta preencher o formulário sozinho (veja a seção 2).</li>
+      <li><b>Preencher com instruções (automático):</b> você informa nome do alerta, data, sentença e descreve o
+          caso em três campos (KYC, Movimentações e Comportamentos); o Sentinela tenta preencher o formulário
+          sozinho (veja a seção 2).</li>
       <li><b>Preencher manualmente:</b> abre o formulário em branco.</li>
     </ul></li>
 </ol>
@@ -48,28 +49,33 @@ formulário já preenchido para você revisar. Os campos da tela são:</p>
 <ul>
   <li><b>Nome do alerta*</b>, <b>Data do alerta*</b> e <b>Sentença*</b>: <b>sempre digitados por você</b>.
       O automático nunca os preenche nem os altera.</li>
-  <li><b>Resumo do caso*</b>: o texto principal. Cole ou escreva tudo o que se sabe sobre o cliente (KYC),
-      as movimentações, as contrapartes e o comportamento. Quanto mais específico, melhor.</li>
-  <li><b>Outras movimentações</b> (opcional): só para movimentações que <b>não</b> sejam transferências
-      bancárias comuns: saques, boletos, gastos no cartão de crédito ou débito, empréstimos, criptomoedas,
-      investimentos. Este campo é a <b>única fonte</b> da seção “Outras movimentações”: o que estiver só no
-      Resumo não vai para ela.</li>
+  <li><b>Informações do KYC do cliente</b>: dados do cliente (ou da empresa e dos sócios, no PJ), região de
+      risco, PEP, mídia negativa, histórico de PLD e de fraude e outras informações de KYC.</li>
+  <li><b>Informações das Movimentações do cliente</b>: período, totais de créditos e débitos, contrapartes
+      e, se houver, as movimentações que <b>não</b> sejam transferências bancárias comuns (saques, boletos,
+      gastos no cartão de crédito ou débito, empréstimos, criptomoedas, investimentos). Estas últimas
+      alimentam a seção “Outras movimentações”.</li>
+  <li><b>Informações dos Comportamentos do cliente</b>: arredondamento de valores, mensagens Pix, evasão,
+      mudança de comportamento e data de abertura da conta/último reporte.</li>
 </ul>
+<p>Os três campos são enviados <b>juntos, mas separados e identificados</b>: cada um preenche só a sua
+seção do formulário (KYC, Bloco 3 e Bloco 4), e o que estiver num campo não preenche a seção de outro.
+Preencha <b>pelo menos um</b>; seção sem texto fica em branco.</p>
 
-<p><b>O que o Sentinela preenche a partir do Resumo</b> (só entra o que o texto afirma):</p>
+<p><b>O que o Sentinela preenche a partir das três informações</b> (só entra o que o texto afirma):</p>
 <ul>
   <li><b>KYC do cliente (PF, Cripto, NuInvest, Under 18):</b> nome, idade, cidade/estado, última atualização
       cadastral, <b>profissão informada</b>, <b>renda presumida</b> (ex.: “renda de R$ 3.500”), registro
       profissional e registro societário (razão social, data de abertura, situação cadastral e ramo).
       O gênero é inferido pelo primeiro nome; se o nome for ambíguo, o formulário pergunta.</li>
-  <li><b>KYC da empresa (PJ):</b> inclua no Resumo o <b>Nome da Empresa, Data de Abertura, Ramo de
+  <li><b>KYC da empresa (PJ):</b> inclua em Informações do KYC o <b>Nome da Empresa, Data de Abertura, Ramo de
       Atividade, Porte, Faturamento Presumido, Endereço, Fachada e Presença Online</b>. Fachada e Presença
       Online vão para o formulário apenas como <b>Sim</b> ou <b>Não</b> (não há campo de detalhe). Os
       <b>sócios</b>: para cada um, inclua nome, idade, endereço (sem endereço, vale o da empresa), renda
       presumida, patrimônio e os Sim/Não de risco. Só entram os que você citar,
       exceto quando você disser que mais de um sócio tem o mesmo sinal (ex.: “2 sócios são PEP”): aí o
       Sentinela cria um sócio para cada um.</li>
-  <li><b>Under 18:</b> inclua no Resumo os dados do <b>responsável legal</b> pelo menor: nome, renda
+  <li><b>Under 18:</b> inclua em Informações do KYC os dados do <b>responsável legal</b> pelo menor: nome, renda
       presumida, registro profissional, registro societário, histórico de PLD e histórico de fraude. Eles
       vão para os campos “Campos adicionais — Caso Under 18” do formulário.</li>
   <li><b>Riscos (Sim/Não e detalhe):</b> região de risco (fronteira, extração mineral/madeira ou outra), PEP
@@ -121,7 +127,7 @@ jeito em PF, PJ, Cripto, NuInvest e Under 18. Só ficam restritos à PJ os dados
 faturamento e porte do titular) e os sócios; no Under 18, a regra de renda baixa/alta vale também para o
 responsável legal.</p>
 
-<p><b>Como escrever o Resumo para o automático acertar</b></p>
+<p><b>Como escrever as informações para o automático acertar</b></p>
 <ul>
   <li><b>Valores:</b> use números claros: “crédito total de R$ 500.000,00”, “renda de R$ 2.800”.</li>
   <li><b>Porcentagens e transações por contraparte:</b> “João Silva (PF, 35 anos, São Paulo/SP) concentrou
@@ -203,7 +209,7 @@ responsável legal.</p>
 </ul>
 
 <div class="sx-man-aviso"><b class="t">Perguntas do KYC</b>
-Quando o Resumo indica <b>Sim</b> em um item do KYC, o Sentinela marca <b>Sim</b> no formulário e preenche
+Quando as informações indicam <b>Sim</b> em um item do KYC, o Sentinela marca <b>Sim</b> no formulário e preenche
 os detalhes que o texto trouxer. Se o <b>Sim</b> vier <b>sem</b> os detalhes, o Sentinela não abre o
 formulário ainda: ele mostra só as perguntas que faltaram, e depois de respondidas você clica em
 <b>Continuar</b>. Os itens são:
@@ -218,17 +224,17 @@ formulário ainda: ele mostra só as perguntas que faltaram, e depois de respond
 </ul>
 Isso vale também para os <b>sócios</b> (caso PJ): região de risco (e o risco da região), PEP (tipo e
 descrição/carência), mídia negativa, histórico de PLD e de fraude, sócio por sócio.
-<br/><br/>E vale para as <b>contrapartes</b> do Bloco 3: se o Resumo disser que uma contraparte é sócia de
+<br/><br/>E vale para as <b>contrapartes</b> do Bloco 3: se as informações disserem que uma contraparte é sócia de
 empresa (registro societário), é PEP, tem mídia negativa, histórico de PLD, histórico de fraude ou região de
-risco, o Sentinela marca <b>Sim</b> nela e pergunta os detalhes, contraparte por contraparte. Se o Resumo
-disser que <b>mais de uma</b> contraparte tem o mesmo sinal (por exemplo, “3 contrapartes são PEP”), o
+risco, o Sentinela marca <b>Sim</b> nela e pergunta os detalhes, contraparte por contraparte. Se as
+informações disserem que <b>mais de uma</b> contraparte tem o mesmo sinal (por exemplo, “3 contrapartes são PEP”), o
 Sentinela <b>cria uma contraparte para cada uma</b>, com o sinal marcado, e pergunta os detalhes de cada
 uma.
-<br/><br/>Para evitar a pergunta, já escreva esses dados no Resumo. Para mudar o Resumo depois de ver as perguntas,
+<br/><br/>Para evitar a pergunta, já escreva esses dados nas informações. Para mudar os textos depois de ver as perguntas,
 use <b>Refazer com outro resumo</b>.</div>
 
 <div class="sx-man-aviso"><b class="t">Mudança de comportamento</b>
-Se o Resumo disser que houve mudança de comportamento, aparecem campos extras na tela e o preenchimento só
+Se as informações disserem que houve mudança de comportamento, aparecem campos extras na tela e o preenchimento só
 continua depois de você respondê-los. As movimentações são descritas em <b>6 meses</b>: o último é o
 <b>mês do alerta</b> (o mês da mudança) e os outros 5 são os <b>meses anteriores</b> à data do alerta. Você
 não precisa informar os meses; basta preencher:
@@ -242,7 +248,7 @@ não precisa informar os meses; basta preencher:
 Nos 5 meses anteriores, o Sentinela usa valores baixos de referência; só o mês do alerta recebe o valor
 elevado.</div>
 
-<div class="sx-man-aviso"><b class="t">Exemplo de Resumo</b>
+<div class="sx-man-aviso"><b class="t">Exemplo (os três campos juntos)</b>
 <pre>Cliente Maria Souza, 34 anos, Recife/PE, declarou ser professora com renda de R$ 3.200.
 Consta registro como sócia de microempresa de comércio. Sem PEP, sem mídia negativa.
 Período de 01/06/2026 até 01/08/2026. Créditos totais de R$ 480.000,00 de 60 contrapartes;

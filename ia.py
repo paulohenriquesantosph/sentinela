@@ -144,7 +144,7 @@ REGRAS (siga todas):
 9. Cada contraparte traz o mini-KYC (registroSocietario, regiaoRisco, pep, historicoPld, historicoFraude, midiaNegativa): "Sim" ou "Não"; na falta de informação, "Não".
 10. A seção outrasMovimentacoes (saques, boletos, cartões, empréstimos, criptomoedas, investimentos) vem EXCLUSIVAMENTE do bloco "OUTRAS MOVIMENTAÇÕES (NÃO BANCÁRIAS)" da mensagem. O que estiver no bloco "RESUMO DO CASO" não vai para essa seção; se o bloco de outras movimentações estiver vazio, devolva [].
 11. Se não houver período no texto, deixe periodo "". Seja conciso nos campos de texto livre.
-12. Com INVENÇÃO AUTORIZADA: SIM e pedido de contrapartes aleatórias, crie nomes, idades, cidades/estados, rendas e cargos plausíveis, OBEDECENDO ao perfil pedido. Ex.: "diversas pessoas físicas sem capacidade financeira elevada" -> rendaPresumida BAIXA e variada em cada contraparte (ex.: R$1.300,00 a R$3.200,00), coerente com o cargo. Se o texto não disser as profissões, crie cargos aleatórios compatíveis com o perfil (ex.: auxiliar administrativo, vendedor, atendente, motorista, diarista) em registroProfissional. Perfil de empresa (PJ): ramo, porte e faturamento compatíveis com o pedido. Nunca contrarie uma instrução dada.
+12. Com INVENÇÃO AUTORIZADA: SIM e pedido de contrapartes aleatórias, crie nomes, idades, cidades/estados, rendas e cargos plausíveis, OBEDECENDO ao perfil pedido. Ex.: "diversas pessoas físicas sem capacidade financeira elevada" -> rendaPresumida BAIXA e variada em cada contraparte (ex.: R$1.300,00 a R$3.200,00), coerente com o cargo. registroProfissional e registro societário das contrapartes NUNCA são inventados: sem menção no texto, registroProfissional fica "" e registroSocietario "Não". Perfil de empresa (PJ): ramo, porte e faturamento compatíveis com o pedido. Nunca contrarie uma instrução dada.
 13. KYC: registroSocietario = "Sim" só se o texto disser que o cliente tem registro societário; nesse caso preencha registroSocietarioDetalhes (razaoSocial, dataAbertura, situacaoCadastral, ramoAtividade) com o que o texto trouxer. Região de risco: se o texto indicar cidade/estado da região, coloque em cidadeEstado (PF); se o tipo for "Outras Regiões de Risco", descreva a região em descricaoRegiaoRisco. PEP: tipoPep e descricaoPep (cargo e carência). Mídia negativa, histórico de PLD e de fraude: detalhe (link, data e fonte, quando houver) em seus campos "...Detalhe". Nunca invente detalhes que o texto não traz (sem INVENÇÃO AUTORIZADA).
 14. outrasInformacoes: coloque aqui TODA informação adicional de KYC que o texto trouxer e que não tenha campo próprio (compartilhamento de dispositivo, redes sociais, processos, dados específicos de NuInvest/Crypto e outras informações não convencionais), UMA INFORMAÇÃO POR LINHA, separadas por quebra de linha, no formato "Rótulo: valor". Não repita o que já tem campo próprio.
 15. Contrapartes com sinais de KYC (sócia de empresa/registro societário, PEP, mídia negativa, histórico de PLD, histórico de fraude, região de risco): marque "Sim" no item de CADA contraparte envolvida e preencha o campo "...Detalhe" correspondente com o que o texto trouxer. Se o texto indicar MAIS DE UMA contraparte com o sinal (ex.: "3 contrapartes são PEP"), CRIE uma entrada por contraparte na lista (mesmo passando de 5 entradas), cada uma com o sinal marcado, mantendo valores e porcentagens coerentes com o total. Nome, idade, cidade/estado e data de abertura dessas contrapartes seguem a regra 20. Nunca invente os detalhes dos sinais.
@@ -156,10 +156,15 @@ REGRAS (siga todas):
 21. LOCALIDADE DAS CONTRAPARTES (linha "LOCALIDADE DAS CONTRAPARTES"), em QUALQUER tipo de caso: "MESMA" = todas moram na mesma cidade/estado do titular (use a cidade/estado do titular em cidadeEstado de cada contraparte). "DIFERENTE" (localidades diferentes do titular ou sem vínculo aparente) = cada contraparte em OUTRA cidade/estado, aleatórios e variados, nunca a do titular. Sem a linha, só preencha o que o texto disser.
 22. RENDA PRESUMIDA DAS CONTRAPARTES PF, em QUALQUER tipo de caso: se o texto indicar renda BAIXA (qualquer termo: baixa, modesta, sem capacidade financeira, reduzida etc.), preencha rendaPresumida com um valor aleatório BAIXO, entre R$1.300,00 e R$3.200,00 (até cerca de 2 salários mínimos; salário mínimo 2026 = R$1.621,00). Se indicar renda ALTA (qualquer termo: alta, elevada, alto poder aquisitivo etc.), preencha com um valor aleatório ALTO, entre R$35.000,00 e R$150.000,00 (acima de 20 salários mínimos, o patamar da classe A no Brasil). Cada contraparte recebe um valor DIFERENTE dos demais; nunca repita o mesmo valor em todas.
 23. FATURAMENTO PRESUMIDO E PORTE (empresas): o faturamento presumido é ANUAL e o porte segue a receita bruta anual da regulamentação brasileira (LC 123/2006 e BNDES): MEI até R$81.000,00; Microempresa (ME) até R$360.000,00; Pequeno Porte (EPP) de R$360.000,01 a R$4.800.000,00; Médio Porte de R$4.800.000,01 a R$300.000.000,00; Grande Porte acima de R$300.000.000,00. Aplique às CONTRAPARTES PJ de qualquer tipo de caso. Faturamento BAIXO = até R$100.000,00: valor aleatório entre R$20.000,00 e R$100.000,00 (porte MEI ou Microempresa). Faturamento ELEVADO: use o porte informado e um valor aleatório dentro da faixa dele (Pequeno Porte, Médio Porte ou Grande Porte; Grande entre R$300.000.000,00 e R$2.000.000.000,00); se o porte não vier, use Médio Porte. Se o texto trouxer o valor, use-o e deduza o porte pela tabela.
-25. CONTRAPARTES DETALHADAS QUANDO PERMITIDO, em QUALQUER tipo de caso: nos lados em que a linha "PREENCHER CONTRAPARTES AUTOMATICAMENTE" disser SIM (há fragmentação, fracionamento, "muitas/diversas contrapartes", perfil descrito ou pedido explícito) e houver total movimentado, CRIE de 3 a 5 contrapartes principais naquele lado se o texto não as listar, em contrapartesCredito/contrapartesDebito, cada uma com TODOS os campos: tipo (Pessoa Física, salvo se o texto disser empresa), nome, idade, cidadeEstado, rendaPresumida, registroProfissional (cargo), porcentagem, valor (porcentagem x total do lado) e numTransacoes; contraparte PJ: nome, dataAbertura, cidadeEstado, ramoAtividade, porte, faturamentoPresumido, porcentagem, valor e numTransacoes. As porcentagens são diferentes entre si e a soma não passa de 100%. Informe também o total de contrapartes (número). Nos lados com NÃO, NÃO crie contrapartes além das que o texto descreve.
+25. CONTRAPARTES DETALHADAS QUANDO PERMITIDO, em QUALQUER tipo de caso: nos lados em que a linha "PREENCHER CONTRAPARTES AUTOMATICAMENTE" disser SIM (há fragmentação, fracionamento, "muitas/diversas contrapartes", perfil descrito ou pedido explícito) e houver total movimentado, CRIE de 3 a 5 contrapartes principais naquele lado se o texto não as listar, em contrapartesCredito/contrapartesDebito, cada uma com TODOS os campos: tipo (Pessoa Física, salvo se o texto disser empresa), nome, idade, cidadeEstado, rendaPresumida, porcentagem, valor (porcentagem x total do lado) e numTransacoes; contraparte PJ: nome, dataAbertura, cidadeEstado, ramoAtividade, porte, faturamentoPresumido, porcentagem, valor e numTransacoes. As porcentagens são diferentes entre si e a soma não passa de 100%. Informe também o total de contrapartes (número). registroProfissional só se o texto o trouxer; sinais de KYC das contrapartes (registro societário, região de risco, PEP, mídia negativa, histórico de PLD e de fraude) ficam "Não" se o texto não os mencionar. Nos lados com NÃO, NÃO crie contrapartes além das que o texto descreve.
 27. APENAS O PEDIDO (linha "APENAS O PEDIDO: SIM", que prevalece sobre as regras 3, 20 e 25): o analista pediu SÓ o que informou (ex.: "uma contraparte de crédito e uma de débito", "transações pontuais", "preencha apenas..."). Insira SOMENTE o que o texto pediu ou informou e NÃO preencha o resto: campos não informados ficam "" (nada de nomes, idades, cidades, rendas, cargos ou transações aleatórios) e não crie contrapartes, sócios nem dados além dos pedidos. A linha "NÚMERO DE CONTRAPARTES PEDIDO: CRÉDITO N, DÉBITO M" dá a quantidade EXATA por lado (para N = 1: uma entrada, com totalContrapartes igual a 1 e valor igual ao total do lado), preenchidas só com o que o texto trouxe; lado sem número na linha segue o texto. Instruções explícitas continuam valendo (ex.: "renda baixa", "mesma localidade", "nome aleatório"). Só se preenche o restante quando o analista pedir ("preencha as demais", "pode preencher") ou descrever fragmentação, fracionamento ou muitas contrapartes, o que a linha "PREENCHER CONTRAPARTES AUTOMATICAMENTE" já resume.
 28. TIMELINE DE TRANSFERÊNCIAS (campo "evasao" de "thundera", créditos e débitos bancários do caso), em QUALQUER tipo de caso: "Rápida Evasão" (o texto diz que os valores recebidos foram rapidamente evadidos/repassados), "Sem Rápida Evasão" (diz que não houve), "Só Créditos (Sem Débitos)" (os valores foram recebidos, mas NÃO evadidos: só créditos, sem débitos), "Só Débitos (Sem Créditos)" (não houve recebimentos; os valores já estavam na conta e foram transferidos nos débitos), "Evasão Parcial (Pequena Parcela nos Débitos)" (recebeu os valores, mas evadiu apenas uma parcela pequena nos débitos). "" se o texto não disser nada. Nos modos de um lado só e na evasão parcial, mantenha em totalCredito/totalDebito os totais que o texto trouxe.
 29. Saída: APENAS um objeto JSON válido, sem markdown, sem crases e sem texto antes ou depois.
+30. TRÊS BLOCOS SEPARADOS: quando a mensagem trouxer os blocos "INFORMAÇÕES DO KYC DO CLIENTE", "INFORMAÇÕES DAS MOVIMENTAÇÕES DO CLIENTE" e "INFORMAÇÕES DOS COMPORTAMENTOS DO CLIENTE", cada bloco alimenta SOMENTE a sua seção do JSON e o que estiver num bloco não preenche a seção de outro:
+    - "kyc" (dados do cliente, PEP, região de risco, históricos, sócios, responsável legal, outras informações) vem SÓ do bloco de KYC;
+    - "movimentacoes" (período, totais e contrapartes de crédito e débito) e "outrasMovimentacoes" vêm SÓ do bloco de MOVIMENTAÇÕES; para "outrasMovimentacoes" vale a regra 10 com este bloco no lugar de "OUTRAS MOVIMENTAÇÕES (NÃO BANCÁRIAS)": só o que NÃO for transferência bancária comum (saques, boletos, cartões, empréstimos, criptomoedas, investimentos); sem isso, devolva [];
+    - "thundera" (arredondamento, pix, evasao, mudancaComportamento, dataAberturaContaUltimoReporte) vem SÓ do bloco de COMPORTAMENTOS.
+    Bloco vazio ("(vazio)") significa que a seção correspondente não tem informação: deixe "" (ou [] para listas). As linhas de apoio no topo da mensagem (INVENÇÃO AUTORIZADA, FRAGMENTAÇÃO etc.) valem para o caso todo.
 """
 
 _REGRAS_PJ = """
@@ -181,6 +186,7 @@ REGRAS ESPECÍFICAS DE PESSOA FÍSICA (inclui Cripto, NuInvest e Under 18):
 _REGRAS_CRIPTO = """
 REGRAS ESPECÍFICAS DE CRIPTO:
 - Em "thundera", inclua também "evasaoCripto": "Rápida Evasão", "Sem Rápida Evasão", "Só Créditos (Sem Débitos)", "Só Débitos (Sem Créditos)" ou "". Ela vale SÓ para os valores de criptomoedas informados em "OUTRAS MOVIMENTAÇÕES (NÃO BANCÁRIAS)" (tipo Criptomoedas), com o montante citado na descrição. "Rápida Evasão": a instrução diz que os valores de cripto foram rapidamente movimentados/repassados/evadidos (ex.: "recebeu e enviou em seguida", "rápida evasão", "repasses rápidos"). "Sem Rápida Evasão": diz que não houve (ex.: "sem rápida evasão", "não houve repasse rápido"). "Só Créditos (Sem Débitos)": os valores foram recebidos, mas NÃO evadidos, sem saídas (ex.: "só créditos", "sem débitos", "recebeu e manteve"). "Só Débitos (Sem Créditos)": não houve recebimentos, e os valores, que já estavam na conta, foram transferidos nos débitos (ex.: "só débitos", "sem créditos", "sem recebimentos", "já estavam na conta"). "" quando a instrução não disser nada. Não confunda com "evasao", que é dos créditos e débitos bancários do caso.
+- Quando a mensagem trouxer os três blocos (regra 30), "evasaoCripto" vem SÓ do bloco de COMPORTAMENTOS; o montante de criptomoedas de "outrasMovimentacoes" continua vindo do bloco de MOVIMENTAÇÕES.
 - Em "outrasMovimentacoes", mantenha na "info" da linha de Criptomoedas o montante em R$ que o texto trouxe (ex.: "R$ 200.000,00") e a instrução dada; não invente montante.
 """
 
@@ -584,9 +590,6 @@ def completar_contrapartes(caso: Caso, texto: str = "", rng: Optional[random.Ran
                     c.idade = str(rng.randint(19, 62))
                 if not (c.renda_presumida or "").strip():
                     c.renda_presumida = _renda_aleatoria(perfil, rng, rendas)
-                if not (c.registro_profissional or "").strip():
-                    cargo = rng.choice(_CARGOS[perfil if perfil in _CARGOS else ""])
-                    c.registro_profissional = cargo if perfil == "ALTA" else f"{cargo}, sem registro profissional"
     return avisos
 
 
@@ -649,14 +652,31 @@ def _config_llm() -> Dict[str, str]:
     return {"base": base, "formato": formato}
 
 
-def montar_mensagem_usuario(texto: str, texto_outras_movimentacoes: str = "") -> str:
-    """Mensagem enviada à IA: linha de autorização de invenção + dois blocos rotulados
-    e separados (resumo principal e outras movimentações não bancárias)."""
-    outras = (texto_outras_movimentacoes or "").strip()
+ROTULOS_BLOCOS = (
+    ("kyc", "INFORMAÇÕES DO KYC DO CLIENTE"),
+    ("movimentacoes", "INFORMAÇÕES DAS MOVIMENTAÇÕES DO CLIENTE"),
+    ("comportamentos", "INFORMAÇÕES DOS COMPORTAMENTOS DO CLIENTE"),
+)
+
+
+def texto_dos_blocos(blocos: Dict[str, str]) -> str:
+    """Os três textos juntos, para as detecções por palavra-chave (invenção, fragmentação, mudança etc.)."""
+    return "\n".join((blocos.get(k) or "").strip() for k, _ in ROTULOS_BLOCOS if (blocos.get(k) or "").strip())
+
+
+def montar_mensagem_usuario(texto: str, texto_outras_movimentacoes: str = "",
+                            blocos: Optional[Dict[str, str]] = None) -> str:
+    """Mensagem enviada à IA: linhas de apoio (invenção autorizada, fragmentação etc.) e o texto do analista.
+    Com `blocos` ({"kyc", "movimentacoes", "comportamentos"}), o texto vai em três blocos rotulados e
+    separados; sem `blocos`, em dois (resumo principal e outras movimentações não bancárias)."""
+    if blocos is not None:
+        texto, outras = texto_dos_blocos(blocos), ""
+    else:
+        outras = (texto_outras_movimentacoes or "").strip()
     invencao = autoriza_invencao(texto) or autoriza_invencao(outras)
     pol = politica_contrapartes(texto)
     sn = lambda v: "SIM" if v else "NÃO"  # noqa: E731
-    return (
+    cabecalho = (
         f"INVENÇÃO AUTORIZADA: {sn(invencao)}\n"
         f"FRAGMENTAÇÃO: {sn(menciona_fragmentacao(texto))}\n"
         f"FRACIONAMENTO ENTRE CONTRAPARTES: {sn(menciona_fracionamento(texto))}\n"
@@ -667,10 +687,13 @@ def montar_mensagem_usuario(texto: str, texto_outras_movimentacoes: str = "") ->
             f"{nome} {pol['limite'][k]}" for k, nome in (("cred", "CRÉDITO"), ("deb", "DÉBITO"))
             if pol["limite"][k]) + "\n") if any(pol["limite"].values()) else "")
         + f"PREENCHER CONTRAPARTES AUTOMATICAMENTE: CRÉDITO {sn(pol['livre']['cred'])}, DÉBITO {sn(pol['livre']['deb'])}\n"
-        + "\n"
-        "### RESUMO DO CASO\n" + (texto or "").strip() + "\n\n"
-        "### OUTRAS MOVIMENTAÇÕES (NÃO BANCÁRIAS)\n" + (outras or "(vazio)")
-    )
+        + "\n")
+    if blocos is not None:
+        return cabecalho + "\n\n".join(
+            f"### {rotulo}\n" + ((blocos.get(chave) or "").strip() or "(vazio)") for chave, rotulo in ROTULOS_BLOCOS)
+    return (cabecalho +
+            "### RESUMO DO CASO\n" + (texto or "").strip() + "\n\n"
+            "### OUTRAS MOVIMENTAÇÕES (NÃO BANCÁRIAS)\n" + (outras or "(vazio)"))
 
 
 def extrair_dados_do_texto(
@@ -680,11 +703,13 @@ def extrair_dados_do_texto(
     api_key: Optional[str] = None,
     model: Optional[str] = None,
     timeout: int = 60,
+    blocos: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     """Chama o serviço de IA e devolve o JSON extraído do texto (dict).
 
     A IA nunca recebe nome do alerta, data do alerta nem sentença. A seção
-    outrasMovimentacoes só é aproveitada se o campo próprio foi preenchido."""
+    outrasMovimentacoes só é aproveitada se o campo próprio foi preenchido (ou, com `blocos`, se o bloco de
+    movimentações foi preenchido)."""
     api_key = api_key or os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
         raise ErroExtracaoIA(
@@ -694,7 +719,7 @@ def extrair_dados_do_texto(
     cfg = _config_llm()
     model = model or os.environ.get("SENTINELA_LLM_MODELO", "claude-sonnet-4-6")
     system = prompt_para_tipo(tipo_caso)
-    mensagem = montar_mensagem_usuario(texto, texto_outras_movimentacoes)
+    mensagem = montar_mensagem_usuario(texto, texto_outras_movimentacoes, blocos=blocos)
 
     if cfg["formato"] == "openai":
         url = cfg["base"] + "/v1/chat/completions"
@@ -743,8 +768,9 @@ def extrair_dados_do_texto(
             "a esse endereço."
         )
 
-    if not (texto_outras_movimentacoes or "").strip():
-        dados["outrasMovimentacoes"] = []  # só o campo próprio alimenta essa seção
+    fonte_outras = (blocos.get("movimentacoes") if blocos is not None else texto_outras_movimentacoes) or ""
+    if not fonte_outras.strip():
+        dados["outrasMovimentacoes"] = []  # só o campo próprio (ou o bloco de movimentações) alimenta essa seção
     return dados
 
 
@@ -1330,6 +1356,123 @@ def _ler_chave_cp(chave: str) -> Tuple[str, int, str]:
     return lado, int(i), campo
 
 
+_SINAIS_TEXTO_KYC = (  # (campo do Sim, campo do detalhe, padrão)
+    ("pep", "descricao_pep", re.compile(r"\bpep\b|pessoa\s+politicamente\s+exposta", re.I)),
+    ("midia_negativa", "midia_negativa_detalhe", re.compile(r"m[ií]dia\s+negativa", re.I)),
+    ("historico_pld", "historico_pld_detalhe",
+     re.compile(r"hist[óo]rico\s+(?:de\s+)?pld|\bcoaf\b|\bpld\b|reporte|comunica[çc][ãa]o\s+(?:ao\s+)?(?:coaf|bacen)", re.I)),
+    ("historico_fraude", "historico_fraude_detalhe", re.compile(r"fraud", re.I)),
+)
+_REGIAO_TEXTO_KYC = (  # (tipo da região de risco, padrão)
+    (TIPOS_REGIAO_RISCO_1[0], re.compile(r"fronteira", re.I)),
+    (TIPOS_REGIAO_RISCO_1[1], re.compile(r"extra[çc][ãa]o\s+(?:mineral|de\s+(?:min[ée]rio|madeira))|garimpo|"
+                                         r"quadril[áa]tero\s+ferr[íi]fero|madeireir", re.I)),
+)
+_NEGACAO_KYC = re.compile(r"\b(?:n[ãa]o|sem|nunca|nenhum[a]?)\b(?:\W+\w+){0,3}\W*$", re.I)
+
+
+def _linha_afirmada(texto: str, rx: "re.Pattern[str]") -> str:
+    """Primeira linha do texto que cita o padrão sem negá-lo ("não é PEP"); vazio se não houver."""
+    for linha in (texto or "").splitlines():
+        for m in rx.finditer(linha):
+            if not _NEGACAO_KYC.search(linha[max(0, m.start() - 40):m.start()]):
+                return linha.strip()
+    return ""
+
+
+def zerar_sinais_nao_mencionados(caso: Caso, texto: str) -> None:
+    """PEP, mídia negativa, histórico de PLD e de fraude do titular só ficam "Sim" se o analista os mencionou
+    (sem negar) em algum dos três blocos; senão voltam para "Não", sem detalhe."""
+    for sim, det, rx in _SINAIS_TEXTO_KYC:
+        if getattr(caso, sim) == "Sim" and not _linha_afirmada(texto, rx):
+            setattr(caso, sim, "Não")
+            setattr(caso, det, "")
+            if sim == "pep":
+                caso.tipo_pep = ""
+
+
+_SINAIS_TEXTO_CONTRAPARTE = (  # (campo da contraparte, padrão no texto)
+    ("registro_societario", re.compile(r"s[óo]ci[oa]s?\b|registro\s+societ|empres[aá]ri|dono\s+de\s+empresa|"
+                                       r"propriet[áa]ri[oa]\s+de\s+empresa|\bmei\b|\bcnpj\b", re.I)),
+    ("regiao_risco", re.compile(r"regi[ãa]o\s+de\s+risco|fronteira|garimpo|extra[çc][ãa]o|quadril[áa]tero|madeireir|"
+                                r"minera[çc][ãa]o", re.I)),
+    ("pep", _SINAIS_TEXTO_KYC[0][2]),
+    ("midia_negativa", _SINAIS_TEXTO_KYC[1][2]),
+    ("historico_pld", _SINAIS_TEXTO_KYC[2][2]),
+    ("historico_fraude", _SINAIS_TEXTO_KYC[3][2]),
+)
+
+
+def zerar_sinais_contrapartes(caso: Caso, texto: str) -> None:
+    """Sinais de KYC das contrapartes só ficam "Sim" se o analista os mencionou (sem negar) no texto;
+    senão voltam para "Não", sem detalhe."""
+    for _, attr_lista in _LADOS.values():
+        for cp in getattr(caso, attr_lista):
+            for campo, rx in _SINAIS_TEXTO_CONTRAPARTE:
+                if getattr(cp, campo) == "Sim" and not _linha_afirmada(texto, rx):
+                    setattr(cp, campo, "Não")
+                    setattr(cp, campo + "_detalhe", "")
+
+
+_RAZOES_ALEATORIAS = ("Silva & Souza", "Horizonte", "Nova Era", "Central", "Mendes e Filhos", "Brasil Sul", "Aurora",
+                      "Pinheiro", "Vale Verde", "Santos Lima")
+_SITUACOES_ALEATORIAS = ("Ativa", "Ativa", "Ativa", "Baixada", "Inapta")
+_CHAVES_REGISTRO = ("reg_soc_razao_social", "reg_soc_data_abertura", "reg_soc_situacao_cadastral",
+                    "reg_soc_ramo_atividade")
+
+
+def aceita_aleatorio_kyc(chave: str) -> bool:
+    """A pergunta é sobre dados da empresa do registro societário, que o analista pode deixar a cargo do Sentinela."""
+    return chave in _CHAVES_REGISTRO or (chave.startswith("cp" + _SEP) and chave.endswith("registro_societario_detalhe"))
+
+
+def respostas_aleatorias_kyc(chaves: List[str], rng: Optional[random.Random] = None) -> Dict[str, str]:
+    """Valores plausíveis (inventados) para as perguntas de registro societário listadas em `chaves`."""
+    rng = rng or random.Random()
+    out: Dict[str, str] = {}
+    for chave in chaves:
+        if not aceita_aleatorio_kyc(chave):
+            continue
+        razao = f"{rng.choice(_RAZOES_ALEATORIAS)} {rng.choice(_SUFIXOS_EMPRESA)}"
+        data = f"{rng.randint(1, 28):02d}/{rng.randint(1, 12):02d}/{rng.randint(2005, 2023)}"
+        situacao, ramo = rng.choice(_SITUACOES_ALEATORIAS), rng.choice(_RAMOS)
+        if chave.startswith("cp" + _SEP):
+            out[chave] = f"{razao}, aberta em {data}, situação cadastral {situacao}, ramo de atividade: {ramo}"
+        else:
+            out[chave] = {"reg_soc_razao_social": razao, "reg_soc_data_abertura": data,
+                          "reg_soc_situacao_cadastral": situacao, "reg_soc_ramo_atividade": ramo}[chave]
+    return out
+
+
+def marcar_sinais_do_texto_kyc(caso: Caso, texto_kyc: str) -> None:
+    """Se o analista citou, no bloco do KYC, PEP, mídia negativa, histórico de PLD (ou COAF), histórico de fraude
+    ou região de risco (fronteira, extração mineral/madeira), marca "Sim" no campo do titular e, quando o detalhe
+    veio vazio, copia para ele o que o analista escreveu; `faltas_kyc` pede só o que ainda faltar. Menções
+    negadas ("não é PEP") são ignoradas, e o sinal que a IA atribuiu a um sócio ou contraparte não vira do titular."""
+    outros = [*caso.socios, *caso.contrapartes_credito, *caso.contrapartes_debito]
+    for sim, det, rx in _SINAIS_TEXTO_KYC:
+        linha = _linha_afirmada(texto_kyc, rx)
+        if not linha or (getattr(caso, sim) != "Sim" and any(getattr(o, sim, "") == "Sim" for o in outros)):
+            continue
+        setattr(caso, sim, "Sim")
+        sobra = rx.sub(" ", linha)
+        so_um_sinal = sum(1 for _, _, o in _SINAIS_TEXTO_KYC if o.search(linha)) == 1
+        if _vazio(getattr(caso, det)) and so_um_sinal and len(re.findall(r"\w+", sobra)) >= 3:
+            setattr(caso, det, linha)  # só linhas com informação de verdade, não a que apenas lista os sinais
+        if sim == "pep" and not caso.tipo_pep:
+            if re.search(r"relacionad|familiar|parente", linha, re.I):
+                caso.tipo_pep = TIPOS_PEP[1]
+            elif re.search(r"titular", linha, re.I):
+                caso.tipo_pep = TIPOS_PEP[0]
+    if not any(o.regiao_risco == "Sim" for o in outros) or caso.regiao_risco == "Sim":
+        for tipo, rx in _REGIAO_TEXTO_KYC:
+            linha = _linha_afirmada(texto_kyc, rx)
+            if linha:
+                caso.regiao_risco = "Sim"
+                caso.tipo_regiao_risco = caso.tipo_regiao_risco or tipo
+                break
+
+
 def faltas_kyc(caso: Caso) -> List[str]:
     """Chaves das informações de KYC que o analista ainda precisa dar: toda vez que a IA marcou "Sim"
     (registro societário, região de risco, PEP, mídia negativa, histórico de PLD ou de fraude), no
@@ -1451,19 +1594,75 @@ def _ajustar_evasao_cripto(caso: Caso) -> None:
         caso.comp_evasao_cripto = evasao_cripto_do_texto(instrucao)
 
 
+_TERMOS_OUTRA_MOV = (  # (tipo do formulário, padrão no texto sem acento)
+    ("Saques", re.compile(r"\bsaq\w+|\bsacou|\bsacad\w+|\bsacar|retirad\w+\s+em\s+especie|caixa\s+eletronico")),
+    ("Boletos", re.compile(r"\bboletos?\b")),
+    ("Gastos Cartão de Crédito", re.compile(r"cartao\s+de\s+credito|fatura|gastos?\s+(?:no|com)\s+credito|"
+                                           r"compras?\s+no\s+credito")),
+    ("Gastos Cartão de Débito", re.compile(r"cartao\s+de\s+debito|gastos?\s+(?:no|com)\s+debito|"
+                                          r"compras?\s+no\s+debito")),
+    ("Empréstimos", re.compile(r"emprestim\w+|consignado|financiament\w+|credito\s+pessoal")),
+    ("Criptomoedas", re.compile(r"cripto\w*|bitcoin|\bbtc\b|\busdt\b|ethereum|\beth\b|stablecoin")),
+    ("Investimentos", re.compile(r"investiment\w+|\bcdbs?\b|tesouro\s+direto|renda\s+fixa|renda\s+variavel|"
+                                 r"\bacoes\b|\bfundos?\s+de\s+investimento")),
+)
+_NEGA_OUTRA_MOV = re.compile(r"\b(?:nao|sem|nunca|nenhum\w*)\b(?:\W+\w+){0,3}\W*$")
+
+
+def outras_movimentacoes_do_texto(texto: str) -> List[OutraMovimentacao]:
+    """Lê o texto do analista e devolve uma linha por tipo de "Outras Movimentações" citado (saques, boletos,
+    cartões, empréstimos, criptomoedas, investimentos), com o trecho escrito por ele (valores incluídos) em `info`.
+    Trechos sem termo (ex.: "R$ 5.000,00 no total") vão para o tipo citado logo antes. Negações são ignoradas."""
+    achados: Dict[str, List[str]] = {}
+    ultimo: Optional[str] = None
+    for frase in re.split(r"[;\n]|\.(?=\s|$)", texto or ""):
+        for trecho in re.split(r",\s|\s+e\s+", frase):
+            sem = _sem_acento(trecho)
+            tipos = []
+            for tipo, rx in _TERMOS_OUTRA_MOV:
+                m = rx.search(sem)
+                if m and not _NEGA_OUTRA_MOV.search(sem[:m.start()]):
+                    tipos.append(tipo)
+            if tipos:
+                for tipo in tipos:
+                    achados.setdefault(tipo, []).append(trecho.strip())
+                ultimo = tipos[-1]
+            elif ultimo and trecho.strip():
+                achados[ultimo].append(trecho.strip())
+    ordem = {t: i for i, t in enumerate(TIPOS_OUTRAS_MOV)}
+    return [OutraMovimentacao(tipo=t, info=", ".join(x for x in partes if x))
+            for t, partes in sorted(achados.items(), key=lambda kv: ordem[kv[0]])]
+
+
+def completar_outras_movimentacoes(caso: Caso, texto_movimentacoes: str) -> None:
+    """Garante uma linha de "Outras Movimentações" para cada tipo que o analista citou, mesmo que a IA não a tenha
+    devolvido. Linhas que a IA já criou para o tipo são mantidas; nada é inventado."""
+    existentes = {m.tipo for m in caso.outras_movimentacoes}
+    novas = [m for m in outras_movimentacoes_do_texto(texto_movimentacoes) if m.tipo not in existentes]
+    if novas:
+        caso.outras_movimentacoes = [*caso.outras_movimentacoes, *novas]
+
+
 def extrair_caso_via_ia(tipo_caso: str, fator_gerador: str, data_alerta: str, sentenca: str,
-                          resumo: str, outras_movimentacoes: str = "", hoje: Optional[date] = None,
-                          mudanca: Optional[Dict[str, Any]] = None,
-                          **kw: Any) -> Tuple[Caso, List[str]]:
+                          resumo: str = "", outras_movimentacoes: str = "", hoje: Optional[date] = None,
+                          mudanca: Optional[Dict[str, Any]] = None, kyc: str = "", movimentacoes: str = "",
+                          comportamentos: str = "", **kw: Any) -> Tuple[Caso, List[str]]:
     """Extrai, aplica e ajusta a coerência, SEM completar os obrigatórios (o app ainda pode
     perguntar o que faltou no KYC). Devolve (caso, avisos). Os três campos do alerta são
-    copiados como o analista digitou."""
+    copiados como o analista digitou. Com `kyc`, `movimentacoes` e/ou `comportamentos`, os três textos vão
+    separados na mesma chamada (o `resumo` e `outras_movimentacoes` são ignorados)."""
     caso = Caso(numero_caso="tmp", tipo_caso=tipo_caso)
     caso.fator_gerador = fator_gerador
     caso.data_alerta = data_alerta
     caso.sentenca = sentenca
-    dados = extrair_dados_do_texto(resumo, outras_movimentacoes, tipo_caso=tipo_caso, **kw)
+    blocos = {"kyc": kyc, "movimentacoes": movimentacoes, "comportamentos": comportamentos}
+    if any(v.strip() for v in blocos.values()):
+        resumo, outras_movimentacoes = texto_dos_blocos(blocos), ""
+    else:
+        blocos = None
+    dados = extrair_dados_do_texto(resumo, outras_movimentacoes, tipo_caso=tipo_caso, blocos=blocos, **kw)
     aplicar_dados_extraidos(caso, dados, hoje)
+    completar_outras_movimentacoes(caso, movimentacoes if blocos is not None else outras_movimentacoes)
     _ajustar_evasao_cripto(caso)
     texto_total = f"{resumo}\n{outras_movimentacoes}"
     avisos_cp = ajustar_contrapartes_pedidas(caso, texto_total) + completar_contrapartes(caso, texto_total)

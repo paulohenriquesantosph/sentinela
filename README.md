@@ -250,8 +250,9 @@ Abre em `http://localhost:8501`. Para sair do venv: `deactivate`.
 1. **Iniciar novo caso** → escolha o tipo (PF, PJ, Cripto, NuInvest, Under 18).
 2. Escolha **Preencher com instruções (automático)** ou **Preencher manualmente**.
    No automático você digita **Nome do alerta, Data do alerta e Sentença** (a IA nunca
-   preenche esses três), cola o resumo do caso e, se quiser, as movimentações não
-   bancárias (saques, boletos, cartões etc., que só entram pelo campo próprio).
+   preenche esses três) e descreve o caso em três campos: **Informações do KYC**,
+   **das Movimentações** (inclui saques, boletos, cartões etc.) e **dos Comportamentos**.
+   Os três vão juntos, em blocos separados, e cada um preenche só a sua seção.
 3. Revise os 4 blocos: Alerta/Sentença, KYC, Resumo de Movimentações, Thundera/AML 360.
    O formulário lista os campos obrigatórios que faltarem.
 4. **Gerar dossiê do caso** → grava no Banco (JSON + PDF) e mostra a prévia.

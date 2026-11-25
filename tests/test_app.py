@@ -309,8 +309,8 @@ class TestIA(BaseApp):
             self.assertIn("Preencha", at.session_state.ia_erro)
             at.text_input(key="ia_fator").set_value("Transfer In")
             at.text_area(key="ia_sentenca").set_value("Alerta por volume incompatível.")
-            at.text_area(key="ia_resumo").set_value("Cliente João, renda R$1.200,00, R$500 mil.")
-            at.text_area(key="ia_outras").set_value("Saques de R$90.000,00 em 38 saques.")
+            at.text_area(key="ia_kyc").set_value("Cliente João, renda R$1.200,00, R$500 mil.")
+            at.text_area(key="ia_mov").set_value("Saques de R$90.000,00 em 38 saques.")
             at.run()
             self.clicar(at, "ia_preencher")
             self.assertEqual(at.session_state.tela, "formulario", at.session_state.ia_erro)
@@ -325,6 +325,36 @@ class TestIA(BaseApp):
             self.clicar(at, "gerar_dossie")
             self.assertTrue(at.session_state.gerado_numero)
 
+    def test_tela_tem_tres_caixas_e_envia_separado(self):
+        fake = FakeLLM()
+        self.addCleanup(fake.fechar)
+        env = {"ANTHROPIC_API_KEY": "x", "ANTHROPIC_BASE_URL": fake.url, "SENTINELA_LLM_FORMATO": "openai",
+               "SENTINELA_LLM_MODELO": "fake"}
+        with mock.patch.dict(os.environ, env):
+            at = self.app()
+            self.clicar(at, "home_novo")
+            self.clicar(at, "tipo_0")
+            self.clicar(at, "modo_auto")
+            chaves = [t.key for t in at.text_area]
+            self.assertTrue({"ia_kyc", "ia_mov", "ia_comp"} <= set(chaves))
+            self.assertNotIn("ia_resumo", chaves)
+            self.assertNotIn("ia_outras", chaves)
+            at.text_input(key="ia_fator").set_value("Transfer In")
+            at.text_area(key="ia_sentenca").set_value("Alerta por volume incompatível.")
+            self.clicar(at, "ia_preencher")  # nenhuma das três preenchida
+            self.assertIn("pelo menos uma", at.session_state.ia_erro)
+            at.text_area(key="ia_kyc").set_value("KYC-AAAA cliente João")
+            at.text_area(key="ia_mov").set_value("MOV-BBBB créditos de R$500 mil")
+            at.text_area(key="ia_comp").set_value("COMP-CCCC arredondamento")
+            at.run()
+            self.clicar(at, "ia_preencher")
+            self.assertEqual(at.session_state.tela, "formulario", at.session_state.ia_erro)
+            self.assertEqual(len(fake.requisicoes), 1)
+            msg = fake.requisicoes[0][2]["messages"][1]["content"]
+            for rotulo in ("INFORMAÇÕES DO KYC DO CLIENTE", "INFORMAÇÕES DAS MOVIMENTAÇÕES DO CLIENTE",
+                           "INFORMAÇÕES DOS COMPORTAMENTOS DO CLIENTE"):
+                self.assertIn(rotulo, msg)
+
     def test_erro_da_ia_aparece_na_tela(self):
         fake = FakeLLM()
         self.addCleanup(fake.fechar)
@@ -337,7 +367,7 @@ class TestIA(BaseApp):
             self.clicar(at, "modo_auto")
             at.text_input(key="ia_fator").set_value("A")
             at.text_area(key="ia_sentenca").set_value("B")
-            at.text_area(key="ia_resumo").set_value("C")
+            at.text_area(key="ia_kyc").set_value("C")
             at.run()
             self.clicar(at, "ia_preencher")
             self.assertEqual(at.session_state.tela, "preenchimento_ia")
@@ -615,8 +645,8 @@ class TestTimelineCriptoNoFormulario(BaseApp):
             self.clicar(at, "modo_auto")
             at.text_input(key="ia_fator").set_value("Transfer In")
             at.text_area(key="ia_sentenca").set_value("Alerta.")
-            at.text_area(key="ia_resumo").set_value("Cliente cripto.")
-            at.text_area(key="ia_outras").set_value("Cripto: R$300.000,00, enviou em seguida.")
+            at.text_area(key="ia_kyc").set_value("Cliente cripto.")
+            at.text_area(key="ia_mov").set_value("Cripto: R$300.000,00, enviou em seguida.")
             at.run()
             self.clicar(at, "ia_preencher")
             self.assertEqual(at.session_state.tela, "formulario", at.session_state.ia_erro)
@@ -638,7 +668,7 @@ class TestIAPerguntasKYC(BaseApp):
             self.clicar(at, "modo_auto")
             at.text_input(key="ia_fator").set_value("Transfer In")
             at.text_area(key="ia_sentenca").set_value("Alerta.")
-            at.text_area(key="ia_resumo").set_value("Ana, região de risco, PEP e mídia negativa.")
+            at.text_area(key="ia_kyc").set_value("Ana, região de risco, PEP e mídia negativa.")
             at.run()
             self.clicar(at, "ia_preencher")
             # ficou na tela, perguntando só o que faltou (o tipo de PEP já veio)
@@ -680,7 +710,7 @@ class TestIAPerguntasKYC(BaseApp):
             self.clicar(at, "modo_auto")
             at.text_input(key="ia_fator").set_value("Transfer In")
             at.text_area(key="ia_sentenca").set_value("Alerta.")
-            at.text_area(key="ia_resumo").set_value("Duas contrapartes de crédito são PEP.")
+            at.text_area(key="ia_kyc").set_value("Duas contrapartes de crédito são PEP.")
             at.run()
             self.clicar(at, "ia_preencher")
             self.assertEqual(at.session_state.tela, "preenchimento_ia")
@@ -714,7 +744,7 @@ class TestIAPerguntasKYC(BaseApp):
             self.assertIn("Caso PJ — dados do sócio", _html(at))  # e com os dados do sócio
             at.text_input(key="ia_fator").set_value("Transfer In")
             at.text_area(key="ia_sentenca").set_value("Alerta.")
-            at.text_area(key="ia_resumo").set_value("Padaria, dois sócios PEP.")
+            at.text_area(key="ia_kyc").set_value("Padaria, dois sócios PEP.")
             at.run()
             self.clicar(at, "ia_preencher")
             self.assertEqual(at.session_state.tela, "preenchimento_ia")
@@ -746,7 +776,7 @@ class TestIAPerguntasKYC(BaseApp):
                 self.clicar(at, "modo_auto")
                 at.text_input(key="ia_fator").set_value("Transfer In")
                 at.text_area(key="ia_sentenca").set_value("Alerta.")
-                at.text_area(key="ia_resumo").set_value("Contraparte PEP. Houve mudança de comportamento.")
+                at.text_area(key="ia_kyc").set_value("Contraparte PEP. Houve mudança de comportamento.")
                 at.run()
                 # a mudança de comportamento pergunta valor e data de abertura/último reporte, em qualquer tipo
                 self.assertEqual(sorted(w.key for w in at.text_input if w.key.startswith("ia_mc_")),
@@ -788,7 +818,7 @@ class TestIAPerguntasKYC(BaseApp):
             self.clicar(at, "modo_auto")
             at.text_input(key="ia_fator").set_value("Transfer In")
             at.text_area(key="ia_sentenca").set_value("Alerta.")
-            at.text_area(key="ia_resumo").set_value("Movimentou R$1.000,00. Preencha apenas o que eu informei.")
+            at.text_area(key="ia_kyc").set_value("Movimentou R$1.000,00. Preencha apenas o que eu informei.")
             at.run()
             self.clicar(at, "ia_preencher")
             self.assertEqual(at.session_state.tela, "formulario", at.session_state.ia_erro)
@@ -816,7 +846,7 @@ class TestIAPerguntasKYC(BaseApp):
             self.clicar(at, "modo_auto")
             at.text_input(key="ia_fator").set_value("Transfer In")
             at.text_area(key="ia_sentenca").set_value("Alerta.")
-            at.text_area(key="ia_resumo").set_value("Ana, tudo informado.")
+            at.text_area(key="ia_kyc").set_value("Ana, tudo informado.")
             at.run()
             self.clicar(at, "ia_preencher")
             self.assertEqual(at.session_state.tela, "formulario", at.session_state.ia_erro)

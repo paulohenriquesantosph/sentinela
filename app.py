@@ -407,7 +407,12 @@ def tela_modo_preenchimento() -> None:
 # PREENCHIMENTO AUTOMÁTICO VIA IA
 # ---------------------------------------------------------------------------
 def _respostas_kyc(caso: Caso) -> Dict[str, str]:
-    return {k: _txt(f"ia_kyc_{k}") for k in ia.faltas_kyc(caso)}
+    faltas = ia.faltas_kyc(caso)
+    respostas = {k: _txt(f"ia_kyc_{k}") for k in faltas}
+    # dados da empresa que o analista deixou a cargo do Sentinela ("Preencher aleatoriamente")
+    aleatorias = [k for k in faltas if ia.aceita_aleatorio_kyc(k) and ss.get(f"ia_kyc_aleat_{k}")]
+    respostas.update(ia.respostas_aleatorias_kyc(aleatorias))
+    return respostas
 
 
 def _concluir_ia(caso: Caso, avisos: List[str]) -> None:
@@ -423,6 +428,11 @@ def _concluir_ia(caso: Caso, avisos: List[str]) -> None:
 def _refazer_ia() -> None:
     ss.ia_pendente = None
     ss.ia_erro = ""
+
+
+def _texto_ia() -> str:
+    """Os três textos do preenchimento automático juntos (para detectar, por exemplo, mudança de comportamento)."""
+    return "\n".join(_txt(k) for k in ("ia_kyc", "ia_mov", "ia_comp") if _txt(k))
 
 
 def _preencher_com_ia() -> None:
@@ -444,10 +454,10 @@ def _preencher_com_ia() -> None:
         erros.append("Data do alerta")
     if not _txt("ia_sentenca"):
         erros.append("Sentença")
-    if not _txt("ia_resumo"):
-        erros.append("Resumo do caso")
+    if not (_txt("ia_kyc") or _txt("ia_mov") or _txt("ia_comp")):
+        erros.append("pelo menos uma das informações (KYC, Movimentações ou Comportamentos)")
     mudanca = None
-    if ia.menciona_mudanca_comportamento(_txt("ia_resumo")):
+    if ia.menciona_mudanca_comportamento(_texto_ia()):
         mudanca, erros_mc = ia.validar_mudanca(
             _txt("ia_mc_conta"), _txt("ia_data"), _txt("ia_mc_valor"))
         erros += erros_mc
@@ -458,13 +468,16 @@ def _preencher_com_ia() -> None:
         caso, avisos = ia.extrair_caso_via_ia(
             tipo_caso=ss.tipo_caso_novo or TIPOS_CASO[0],
             fator_gerador=_txt("ia_fator"), data_alerta=_txt("ia_data"), sentenca=_txt("ia_sentenca"),
-            resumo=_txt("ia_resumo"), outras_movimentacoes=_txt("ia_outras"), mudanca=mudanca)
+            kyc=_txt("ia_kyc"), movimentacoes=_txt("ia_mov"), comportamentos=_txt("ia_comp"), mudanca=mudanca)
     except ia.ErroExtracaoIA as e:
         ss.ia_erro = str(e)
         return
     except Exception as e:  # noqa: BLE001 - erro inesperado não pode derrubar a tela
         ss.ia_erro = f"Erro inesperado ao preencher com IA: {e}"
         return
+    ia.zerar_sinais_nao_mencionados(caso, _texto_ia())
+    ia.zerar_sinais_contrapartes(caso, _texto_ia())
+    ia.marcar_sinais_do_texto_kyc(caso, _txt("ia_kyc"))
     if ia.faltas_kyc(caso):
         ss.ia_erro = ""
         ss.ia_pendente = {"caso": caso, "avisos": avisos}
@@ -488,6 +501,10 @@ def _painel_kyc_pendente(caso: Caso) -> None:
             grupo_atual = grupo
         rotulo, dica = ia.rotulo_kyc(caso, chave)
         opcoes = ia.opcoes_kyc(chave)
+        if ia.aceita_aleatorio_kyc(chave):
+            st.checkbox(f"{rotulo}: pode preencher aleatoriamente?", key=f"ia_kyc_aleat_{chave}")
+            if ss.get(f"ia_kyc_aleat_{chave}"):
+                continue
         if opcoes:
             escolha(rotulo, f"ia_kyc_{chave}", [""] + opcoes, padrao="", obrig=True)
         else:
@@ -502,7 +519,7 @@ def tela_preenchimento_ia() -> None:
     campo("Data do alerta", "ia_data", padrao=formatar_data_br(date.today()), obrig=True, desabilitado=bloq)
     campo("Sentença", "ia_sentenca", obrig=True, area=True, altura=80, desabilitado=bloq)
     if ss.tipo_caso_novo == TIPO_PJ:
-        estilo.dica("<b>Caso PJ — dados da empresa.</b> Inclua no resumo: <b>Nome da Empresa, Data de Abertura, "
+        estilo.dica("<b>Caso PJ — dados da empresa.</b> Inclua em <b>Informações do KYC</b>: <b>Nome da Empresa, Data de Abertura, "
                     "Ramo de Atividade, Porte, Faturamento Presumido, Endereço, Fachada</b> (Sim ou Não) e "
                     "<b>Presença Online</b> (Sim ou Não). Fachada e Presença Online vão para o formulário "
                     "apenas como Sim ou Não.")
@@ -510,18 +527,19 @@ def tela_preenchimento_ia() -> None:
                     "Presumida, Patrimônio</b> e, se houver, <b>Região de Risco, PEP, Mídia Negativa, Histórico de "
                     "PLD e Histórico de Fraude</b>. Sem endereço do sócio, vale o endereço da empresa.")
     elif ss.tipo_caso_novo == TIPO_UNDER18:
-        estilo.dica("<b>Caso Under 18 — dados do responsável legal.</b> Inclua no resumo: <b>Nome do responsável "
+        estilo.dica("<b>Caso Under 18 — dados do responsável legal.</b> Inclua em <b>Informações do KYC</b>: <b>Nome do responsável "
                     "legal, Renda Presumida, Registro Profissional, Registro Societário, Histórico de PLD e "
                     "Histórico de Fraude</b> do responsável legal pelo menor de idade.")
-    estilo.dica("Cole ou digite um resumo com as informações do caso (cliente, movimentação, contrapartes, "
-                "comportamento) para o Sentinela tentar preencher os campos automaticamente.")
-    campo("Resumo do caso", "ia_resumo", area=True, altura=170, oculto_rotulo=True, desabilitado=bloq)
-    estilo.dica("Outras Movimentações (opcional) — descreva aqui apenas movimentações que <b>não</b> sejam "
-                "transferências bancárias comuns (ex: saques, boletos, gastos no cartão, empréstimos, "
-                "criptomoedas, investimentos). Isso alimenta o campo \"Outras Movimentações\" do Resumo "
-                "de Movimentações.")
-    campo("Outras movimentações", "ia_outras", area=True, altura=110, oculto_rotulo=True, desabilitado=bloq)
-    if ia.menciona_mudanca_comportamento(_txt("ia_resumo")):
+    estilo.dica("Cole ou digite as informações do caso em <b>três campos separados</b>: o Sentinela envia as três "
+                "partes juntas, identificadas, e cada uma preenche só a sua seção do formulário. Preencha pelo "
+                "menos uma.")
+    campo("Informações do KYC do cliente", "ia_kyc", area=True, altura=130, desabilitado=bloq)
+    campo("Informações das Movimentações do cliente", "ia_mov", area=True, altura=170, desabilitado=bloq)
+    estilo.dica("Nas Movimentações, descreva também as movimentações que <b>não</b> sejam transferências bancárias "
+                "comuns (ex: saques, boletos, gastos no cartão, empréstimos, criptomoedas, investimentos). Elas "
+                "alimentam o campo \"Outras Movimentações\" do Resumo de Movimentações.")
+    campo("Informações dos Comportamentos do cliente", "ia_comp", area=True, altura=130, desabilitado=bloq)
+    if ia.menciona_mudanca_comportamento(_texto_ia()):
         estilo.dica("<b>Você citou mudança de comportamento.</b> As movimentações serão descritas em 6 meses: o "
                     "último é o mês do alerta (mês da mudança) e os outros 5 são os meses anteriores. Se não "
                     "informar o valor, o Sentinela cria um valor elevado para o mês da mudança, sempre abaixo do "

@@ -209,6 +209,49 @@ class TestChamada(BaseLLM):
         dados = ia.extrair_dados_do_texto("Resumo", "Saques", api_key="k")
         self.assertEqual(len(dados["outrasMovimentacoes"]), 1)
 
+    def test_tres_blocos_vao_separados_numa_so_chamada(self):
+        ia.extrair_caso_via_ia(
+            "Pessoa Física (PF)", "Transfer In", "01/10/2026", "SENTENCA-SECRETA-XYZ", hoje=HOJE, api_key="k",
+            kyc="KYC-AAAA cliente João", movimentacoes="MOV-BBBB créditos de R$500 mil",
+            comportamentos="COMP-CCCC arredondamento")
+        self.assertEqual(len(self.fake.requisicoes), 1)  # uma única chamada
+        msg = self.fake.requisicoes[0][2]["messages"][1]["content"]
+        i_kyc = msg.index("### INFORMAÇÕES DO KYC DO CLIENTE")
+        i_mov = msg.index("### INFORMAÇÕES DAS MOVIMENTAÇÕES DO CLIENTE")
+        i_comp = msg.index("### INFORMAÇÕES DOS COMPORTAMENTOS DO CLIENTE")
+        self.assertTrue(i_kyc < i_mov < i_comp)
+        kyc, mov, comp = msg[i_kyc:i_mov], msg[i_mov:i_comp], msg[i_comp:]
+        self.assertIn("KYC-AAAA", kyc)
+        self.assertTrue("MOV-BBBB" in mov and "MOV-BBBB" not in kyc + comp)
+        self.assertTrue("COMP-CCCC" in comp and "COMP-CCCC" not in kyc + mov)
+        self.assertNotIn("### RESUMO DO CASO", msg)
+        self.assertNotIn("SENTENCA-SECRETA-XYZ", msg)
+
+    def test_bloco_vazio_vai_como_vazio(self):
+        ia.extrair_dados_do_texto("", "", api_key="k", blocos={"kyc": "Cliente João", "movimentacoes": "  "})
+        msg = self.fake.requisicoes[0][2]["messages"][1]["content"]
+        self.assertTrue(msg.rstrip().endswith("(vazio)"))
+        self.assertEqual(msg.count("(vazio)"), 2)
+
+    def test_linhas_de_apoio_enxergam_os_tres_blocos(self):
+        msg = ia.montar_mensagem_usuario("", blocos={"kyc": "Cliente João", "movimentacoes": "Muita fragmentação",
+                                                     "comportamentos": "invente o que faltar"})
+        self.assertIn("INVENÇÃO AUTORIZADA: SIM", msg)
+        self.assertIn("FRAGMENTAÇÃO: SIM", msg)
+
+    def test_outras_movimentacoes_dos_tres_blocos_vem_do_bloco_de_movimentacoes(self):
+        d = ia.extrair_dados_do_texto("", "", api_key="k", blocos={"kyc": "Cliente João", "movimentacoes": ""})
+        self.assertEqual(d["outrasMovimentacoes"], [])  # sem movimentações, a seção é descartada
+        d = ia.extrair_dados_do_texto("", "", api_key="k", blocos={"movimentacoes": "Saques de R$90.000"})
+        self.assertEqual(len(d["outrasMovimentacoes"]), 1)
+
+    def test_prompt_manda_cada_bloco_so_para_a_sua_secao(self):
+        sistema = ia.prompt_para_tipo("Pessoa Física (PF)")
+        self.assertIn("TRÊS BLOCOS SEPARADOS", sistema)
+        for rotulo in ("INFORMAÇÕES DO KYC DO CLIENTE", "INFORMAÇÕES DAS MOVIMENTAÇÕES DO CLIENTE",
+                       "INFORMAÇÕES DOS COMPORTAMENTOS DO CLIENTE"):
+            self.assertIn(rotulo, sistema)
+
     def test_prompt_pj_para_pj(self):
         ia.extrair_dados_do_texto("Empresa X", "", tipo_caso="Pessoa Jurídica (PJ)", api_key="k")
         ia.extrair_dados_do_texto("Cliente Y", "", tipo_caso="NuInvest", api_key="k")
@@ -368,7 +411,7 @@ class TestMudancaRespondida(unittest.TestCase):
 
     def test_regras_de_invencao_no_prompt(self):
         self.assertIn("rendaPresumida BAIXA", ia.SYSTEM_PROMPT_PF)
-        self.assertIn("cargos aleatórios", ia.SYSTEM_PROMPT_PF)
+        self.assertIn("NUNCA são inventados", ia.SYSTEM_PROMPT_PF)  # registro profissional/societário das contrapartes
 
 
 def core_parse(v):
@@ -752,7 +795,7 @@ class TestContrapartesSempreDetalhadas(unittest.TestCase):
                 rendas = [c.renda_presumida for c in lado]
                 self.assertEqual(len(set(rendas)), len(rendas), "rendas devem ser diferentes entre as contrapartes")
                 for c in lado:
-                    for campo in ("nome", "idade", "cidade_estado", "renda_presumida", "registro_profissional",
+                    for campo in ("nome", "idade", "cidade_estado", "renda_presumida",
                                   "valor", "porcentagem", "num_transacoes"):
                         self.assertTrue((getattr(c, campo) or "").strip(), f"{campo} em branco")
                     self.assertTrue(1300 <= ia.parse_valor_br(c.renda_presumida) <= 3200, c.renda_presumida)
@@ -782,7 +825,7 @@ class TestContrapartesSempreDetalhadas(unittest.TestCase):
         self.assertEqual(len(caso.contrapartes_credito), 2)
         self.assertEqual(caso.contrapartes_credito[1].nome, "Beto")
         for c in caso.contrapartes_credito + caso.contrapartes_debito:
-            for campo in ("nome", "idade", "cidade_estado", "renda_presumida", "registro_profissional", "num_transacoes"):
+            for campo in ("nome", "idade", "cidade_estado", "renda_presumida", "num_transacoes"):
                 self.assertTrue((getattr(c, campo) or "").strip(), campo)
         self.assertFalse(any("não detalhava" in a for a in avisos))
 
@@ -813,7 +856,7 @@ class TestContrapartesSempreDetalhadas(unittest.TestCase):
 
 class TestApenasOPedido(unittest.TestCase):
     """Se o analista pede só o que informou ("uma contraparte só", "preencha apenas..."), o Sentinela não preenche o resto."""
-    BRANCOS = ("nome", "idade", "cidade_estado", "renda_presumida", "registro_profissional", "num_transacoes")
+    BRANCOS = ("nome", "idade", "cidade_estado", "renda_presumida", "num_transacoes")
 
     def _dados(self, cp_cred=(), cp_deb=()):
         return {"kyc": {"nome": "Ana Lima", "idade": "30", "cidadeEstado": "Fortaleza/CE"},
@@ -885,7 +928,7 @@ class TestApenasOPedido(unittest.TestCase):
         caso, _ = self._rodar(self._dados([cp], [cp]), "Movimentou com uma contraparte só: João Silva, 40 anos.")
         c = caso.contrapartes_credito[0]
         self.assertEqual((c.nome, c.idade), ("João Silva", "40"))
-        for campo in ("cidade_estado", "renda_presumida", "registro_profissional", "num_transacoes"):
+        for campo in ("cidade_estado", "renda_presumida", "num_transacoes"):
             self.assertEqual(getattr(c, campo), "", campo)
 
     def test_restricao_generica_nao_cria_nem_completa_nada(self):
@@ -979,7 +1022,7 @@ class TestQuandoPreencherContrapartes(unittest.TestCase):
         with mock.patch("ia.extrair_dados_do_texto", return_value=d):
             return ia.preencher_caso_via_ia("Pessoa Física (PF)", "Alerta", "15/06/2026", "S", texto, hoje=HOJE)
 
-    BRANCOS = ("nome", "idade", "cidade_estado", "renda_presumida", "registro_profissional", "num_transacoes")
+    BRANCOS = ("nome", "idade", "cidade_estado", "renda_presumida", "num_transacoes")
 
     def test_pontuais_uma_de_credito_e_uma_de_debito(self):
         for _ in range(20):
@@ -1028,7 +1071,7 @@ class TestQuandoPreencherContrapartes(unittest.TestCase):
             for lado in (caso.contrapartes_credito, caso.contrapartes_debito):
                 c = lado[0]
                 self.assertTrue(1300 <= ia.parse_valor_br(c.renda_presumida) <= 3200, c.renda_presumida)  # pedido
-                for campo in ("nome", "idade", "registro_profissional", "num_transacoes"):
+                for campo in ("nome", "idade", "num_transacoes"):
                     self.assertEqual(getattr(c, campo), "", campo)  # o resto fica em branco
         caso, _ = self._rodar("Apenas uma contraparte de crédito, da mesma localidade do titular.")
         self.assertEqual(caso.contrapartes_credito[0].cidade_estado, "Fortaleza/CE")
@@ -1369,3 +1412,111 @@ class TestInvencao(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SinaisDoTextoKycTests(unittest.TestCase):
+    def _caso(self):
+        from core import Caso
+        return Caso(numero_caso="X1", tipo_caso="PF")
+
+    def test_cita_pep_e_coaf_marca_sim_e_pede_detalhes(self):
+        caso = self._caso()
+        ia.marcar_sinais_do_texto_kyc(caso, "Cliente PEP, com reporte ao COAF e mídia negativa")
+        self.assertEqual((caso.pep, caso.historico_pld, caso.midia_negativa, caso.historico_fraude),
+                         ("Sim", "Sim", "Sim", "Não"))
+        # a linha só lista os sinais, sem informação: o app pergunta cada detalhe
+        self.assertEqual(ia.faltas_kyc(caso), ["tipo_pep", "descricao_pep", "midia_negativa_detalhe",
+                                               "historico_pld_detalhe"])
+
+    def test_mencao_negada_e_ignorada(self):
+        caso = self._caso()
+        ia.marcar_sinais_do_texto_kyc(caso, "Cliente não é PEP e sem histórico de fraude")
+        self.assertEqual((caso.pep, caso.historico_fraude), ("Não", "Não"))
+
+    def test_texto_do_analista_vai_para_o_campo_de_detalhe(self):
+        caso = self._caso()
+        ia.marcar_sinais_do_texto_kyc(
+            caso, "Nome: Ana\nPEP relacionado: irmã de vereador, carência até 2027\n"
+                  "Mídia negativa: link x.com/n, 10/05/2025, G1\nMora em região de fronteira\n"
+                  "Reporte ao COAF em 2024")
+        self.assertEqual(caso.tipo_pep, "PEP Relacionado")
+        self.assertIn("vereador", caso.descricao_pep)
+        self.assertIn("G1", caso.midia_negativa_detalhe)
+        self.assertIn("COAF", caso.historico_pld_detalhe)
+        self.assertEqual((caso.regiao_risco, caso.tipo_regiao_risco), ("Sim", "Região de Fronteira"))
+        self.assertNotIn("descricao_pep", ia.faltas_kyc(caso))
+        self.assertNotIn("tipo_pep", ia.faltas_kyc(caso))
+
+    def test_sem_mencao_fica_nao(self):
+        caso = self._caso()
+        caso.pep = caso.midia_negativa = caso.historico_fraude = "Sim"
+        caso.descricao_pep = "inventado"
+        ia.zerar_sinais_nao_mencionados(caso, "Ana, 30 anos, professora. Renda R$ 3 mil.")
+        self.assertEqual((caso.pep, caso.midia_negativa, caso.historico_fraude, caso.descricao_pep),
+                         ("Não", "Não", "Não", ""))
+
+    def test_conta_cancelada_por_fraude_conta_como_mencao(self):
+        caso = self._caso()
+        ia.marcar_sinais_do_texto_kyc(caso, "Conta anterior cancelada por fraude em 2023 pelo banco X")
+        self.assertEqual(caso.historico_fraude, "Sim")
+        caso.historico_fraude = "Sim"
+        ia.zerar_sinais_nao_mencionados(caso, "Conta anterior cancelada por fraude em 2023")
+        self.assertEqual(caso.historico_fraude, "Sim")
+
+
+class ContrapartesKycTests(unittest.TestCase):
+    def _caso(self):
+        from core import Caso, ContraparteMovimentacao
+        c = Caso(numero_caso="X1", tipo_caso="PF")
+        c.contrapartes_credito = [ContraparteMovimentacao(nome="A", pep="Sim", pep_detalhe="x", midia_negativa="Sim",
+                                                          registro_societario="Sim")]
+        return c
+
+    def test_sem_mencao_as_contrapartes_ficam_nao(self):
+        caso = self._caso()
+        ia.zerar_sinais_contrapartes(caso, "Três contrapartes pessoas físicas de ramos diferentes, nomes aleatórios")
+        cp = caso.contrapartes_credito[0]
+        self.assertEqual((cp.pep, cp.pep_detalhe, cp.midia_negativa, cp.registro_societario),
+                         ("Não", "", "Não", "Não"))
+
+    def test_mencionado_continua_sim(self):
+        caso = self._caso()
+        ia.zerar_sinais_contrapartes(caso, "A contraparte é PEP e tem mídia negativa; é sócia de uma empresa")
+        cp = caso.contrapartes_credito[0]
+        self.assertEqual((cp.pep, cp.midia_negativa, cp.registro_societario), ("Sim", "Sim", "Sim"))
+
+    def test_resposta_aleatoria_so_para_registro_societario(self):
+        chaves = ["reg_soc_razao_social", "reg_soc_ramo_atividade", "cp__cred__0__registro_societario_detalhe",
+                  "descricao_pep"]
+        r = ia.respostas_aleatorias_kyc(chaves)
+        self.assertEqual(sorted(r), sorted(chaves[:3]))
+        self.assertIn("ramo de atividade", r["cp__cred__0__registro_societario_detalhe"])
+
+
+class OutrasMovimentacoesDoTextoTests(unittest.TestCase):
+    def test_cada_termo_vira_o_seu_tipo_com_o_valor(self):
+        r = ia.outras_movimentacoes_do_texto(
+            "Saques de R$ 5.000,00 em caixa eletrônico e boletos de R$ 3.200,50; "
+            "gastos no cartão de crédito de R$ 8.000,00. Empréstimo de R$ 10.000,00, "
+            "comprou bitcoin R$ 20.000,00 e investimentos em CDB de R$ 7.000,00")
+        d = {m.tipo: m.info for m in r}
+        self.assertEqual(list(d), ["Saques", "Boletos", "Gastos Cartão de Crédito", "Empréstimos",
+                                   "Criptomoedas", "Investimentos"])
+        self.assertIn("R$ 5.000,00", d["Saques"])
+        self.assertIn("R$ 3.200,50", d["Boletos"])
+        self.assertIn("R$ 20.000,00", d["Criptomoedas"])
+
+    def test_cartao_de_debito_e_negacao(self):
+        r = ia.outras_movimentacoes_do_texto("Gastos no cartão de débito de R$ 900,00, sem saques")
+        self.assertEqual([m.tipo for m in r], ["Gastos Cartão de Débito"])
+
+    def test_completa_sem_duplicar_o_que_a_ia_ja_trouxe(self):
+        from core import Caso, OutraMovimentacao
+        caso = Caso(numero_caso="X1", tipo_caso="PF")
+        caso.outras_movimentacoes = [OutraMovimentacao(tipo="Saques", info="R$ 5.000,00 (IA)")]
+        ia.completar_outras_movimentacoes(caso, "Saques de R$ 5.000,00 e boletos de R$ 300,00")
+        self.assertEqual([(m.tipo, m.info) for m in caso.outras_movimentacoes],
+                         [("Saques", "R$ 5.000,00 (IA)"), ("Boletos", "boletos de R$ 300,00")])
+
+    def test_sem_termos_nao_cria_nada(self):
+        self.assertEqual(ia.outras_movimentacoes_do_texto("Recebeu Pix de várias pessoas"), [])
