@@ -1368,6 +1368,7 @@ _REGIAO_TEXTO_KYC = (  # (tipo da região de risco, padrão)
     (TIPOS_REGIAO_RISCO_1[1], re.compile(r"extra[çc][ãa]o\s+(?:mineral|de\s+(?:min[ée]rio|madeira))|garimpo|"
                                          r"quadril[áa]tero\s+ferr[íi]fero|madeireir", re.I)),
 )
+_NEGADO_DEPOIS_KYC = re.compile(r"(?:\s+\w+){0,2}\s*[:\-–]\s*(?:n[ãa]o|nenhum[a]?|sem)\b", re.I)  # "PEP: não"
 _NEGACAO_KYC = re.compile(r"\b(?:n[ãa]o|sem|nunca|nenhum[a]?)\b(?:\W+\w+){0,3}\W*$", re.I)
 
 
@@ -1375,7 +1376,8 @@ def _linha_afirmada(texto: str, rx: "re.Pattern[str]") -> str:
     """Primeira linha do texto que cita o padrão sem negá-lo ("não é PEP"); vazio se não houver."""
     for linha in (texto or "").splitlines():
         for m in rx.finditer(linha):
-            if not _NEGACAO_KYC.search(linha[max(0, m.start() - 40):m.start()]):
+            if (not _NEGACAO_KYC.search(linha[max(0, m.start() - 40):m.start()])
+                    and not _NEGADO_DEPOIS_KYC.match(linha[m.end():])):
                 return linha.strip()
     return ""
 
@@ -1471,6 +1473,198 @@ def marcar_sinais_do_texto_kyc(caso: Caso, texto_kyc: str) -> None:
                 caso.regiao_risco = "Sim"
                 caso.tipo_regiao_risco = caso.tipo_regiao_risco or tipo
                 break
+
+
+# ---- Atalhos de comportamento (marcadores na tela do preenchimento automático) -----------------------
+ATALHOS_COMPORTAMENTO = {  # chave -> (rótulo do marcador, frase que o Sentinela já entende)
+    "fragmentacao": ("Fragmentação", "Houve fragmentação."),
+    "fracionamento": ("Fracionamento", "Alto fracionamento entre as contrapartes."),
+    "arredondamento": ("Arredondamento diverso", "Diversas transações arredondadas."),
+    "mudanca": ("Mudança de comportamento", "Houve mudança de comportamento."),
+}
+FRASES_EVASAO = {
+    "Rápida Evasão": "Rápida evasão dos valores recebidos.",
+    "Sem Rápida Evasão": "Sem rápida evasão.",
+    "Só Créditos (Sem Débitos)": "Só créditos, sem débitos.",
+    "Só Débitos (Sem Créditos)": "Só débitos, sem recebimentos.",
+    "Evasão Parcial (Pequena Parcela nos Débitos)": "Evasão parcial: evadiu apenas uma pequena parcela nos débitos.",
+}
+
+
+def texto_com_atalhos(comportamentos: str, atalhos: List[str], evasao: str = "") -> str:
+    """Texto da caixa de Comportamentos acrescido das frases dos marcadores ligados e do modo de evasão escolhido."""
+    frases = [ATALHOS_COMPORTAMENTO[a][1] for a in atalhos if a in ATALHOS_COMPORTAMENTO]
+    if evasao in FRASES_EVASAO:
+        frases.append(FRASES_EVASAO[evasao])
+    return "\n".join(x for x in [(comportamentos or "").strip(), *frases] if x)
+
+
+# ---- KYC no formato "Campo: valor" (lido pelo código, sem depender da IA) -----------------------------
+_NEGA_VALOR = re.compile(r"^\s*(?:n[ãa]o|nenhum[a]?|sem|n/a|-)\s*\.?\s*$", re.I)
+
+
+def _campo_kyc(rotulo: str) -> str:
+    r = _sem_acento(rotulo).strip()
+    if r in ("nome", "nome do cliente"):
+        return "nome"
+    if r == "idade":
+        return "idade"
+    if r in ("cidade/estado", "cidade e estado", "cidade", "cidade-estado"):
+        return "cidade"
+    if r in ("profissao", "profissao informada", "profissao informada pelo cliente"):
+        return "profissao"
+    if r in ("registro profissional", "registros profissionais"):
+        return "registro_prof"
+    if r in ("renda", "renda presumida", "renda presumida do cliente"):
+        return "renda"
+    if r.startswith(("registro societario", "registros societarios")):
+        return "registro_soc"
+    if r.startswith("regiao de risco"):
+        return "regiao"
+    if r.startswith("pep"):
+        return "pep"
+    if r.startswith("midia negativa"):
+        return "midia"
+    if r.startswith(("historico de pld", "historico pld", "coaf", "reporte")):
+        return "pld"
+    if r.startswith(("historico de fraude", "fraude")):
+        return "fraude"
+    if r in ("outras informacoes", "outras informacoes relevantes", "outras"):
+        return "outras"
+    return ""
+
+
+def aplicar_kyc_estruturado(caso: Caso, texto_kyc: str) -> List[str]:
+    """Lê as linhas "Campo: valor" do bloco de KYC e grava direto nos campos do titular (PF, Cripto, NuInvest e
+    Under 18; a PJ segue pela IA). Devolve os campos preenchidos. Linhas sem "Campo:" conhecido não são tocadas."""
+    if caso.eh_pj():
+        return []
+    feitos: List[str] = []
+    for linha in (texto_kyc or "").splitlines():
+        m = re.match(r"^\s*([^:]{2,45}?)\s*:\s*(.+?)\s*$", linha)
+        if not m:
+            continue
+        campo, valor = _campo_kyc(m.group(1)), m.group(2)
+        rotulo = _sem_acento(m.group(1))
+        nega = bool(_NEGA_VALOR.match(valor))
+        if campo == "nome":
+            caso.nome_cliente = valor
+        elif campo == "idade":
+            n = re.search(r"\d+", valor)
+            if not n:
+                continue
+            caso.idade = n.group(0)
+        elif campo == "cidade":
+            caso.cidade_estado = valor
+        elif campo == "profissao":
+            caso.profissao_informada = valor
+        elif campo == "registro_prof":
+            caso.registro_profissional = valor
+        elif campo == "renda":
+            if not re.search(r"\d", valor):
+                continue
+            caso.renda_presumida = normalizar_valor_texto(valor)
+        elif campo == "outras":
+            if valor not in (caso.outras_info or ""):
+                caso.outras_info = (caso.outras_info + "\n" if caso.outras_info else "") + valor
+        elif campo == "registro_soc":
+            caso.registro_societario = "Não" if nega else "Sim"
+            ramo = re.search(r"ramo\s+(?:de\s+|do\s+|da\s+)?(.+)$", valor, re.I)
+            if not nega and ramo:
+                caso.reg_soc_ramo_atividade = ramo.group(1).strip(" .")
+        elif campo == "regiao":
+            if nega:
+                caso.regiao_risco, caso.tipo_regiao_risco, caso.tipo_regiao_risco_2 = "Não", "", ""
+            else:
+                caso.regiao_risco = "Sim"
+                tipo = next((t for t, rx in _REGIAO_TEXTO_KYC if rx.search(valor)), "")
+                caso.tipo_regiao_risco = tipo or TIPOS_REGIAO_RISCO_1[2]
+                caso.tipo_regiao_risco_2 = "" if tipo else valor
+        elif campo == "pep":
+            caso.pep = "Não" if nega else "Sim"
+            if nega:
+                caso.tipo_pep = caso.descricao_pep = ""
+            else:
+                caso.descricao_pep = valor
+                if re.search(r"relacionad|familiar|parente", rotulo + " " + _sem_acento(valor)):
+                    caso.tipo_pep = TIPOS_PEP[1]
+                elif "titular" in rotulo + " " + _sem_acento(valor):
+                    caso.tipo_pep = TIPOS_PEP[0]
+        elif campo in ("midia", "pld", "fraude"):
+            sim, det = {"midia": ("midia_negativa", "midia_negativa_detalhe"),
+                        "pld": ("historico_pld", "historico_pld_detalhe"),
+                        "fraude": ("historico_fraude", "historico_fraude_detalhe")}[campo]
+            setattr(caso, sim, "Não" if nega else "Sim")
+            setattr(caso, det, "" if nega else valor)
+        else:
+            continue
+        feitos.append(campo)
+    return feitos
+
+
+# ---- "O que o Sentinela entendeu": resumo para o analista conferir antes de abrir o formulário -------
+def _cp_sinais(cp: Any) -> str:
+    nomes = {"registro_societario": "registro societário", "regiao_risco": "região de risco", "pep": "PEP",
+             "historico_pld": "histórico de PLD", "historico_fraude": "histórico de fraude",
+             "midia_negativa": "mídia negativa"}
+    return ", ".join(r for c, r in nomes.items() if getattr(cp, c, "") == "Sim")
+
+
+def resumo_entendido(caso: Caso, texto_comportamentos: str = "") -> List[Tuple[str, List[str]]]:
+    """Lista (seção, linhas) com o que o Sentinela entendeu e vai preencher, só a partir do caso já montado."""
+    def sn(v: str, det: str = "") -> str:
+        return "Sim" + (f" — {det}" if (det or "").strip() else "") if v == "Sim" else "Não"
+
+    kyc: List[str] = []
+    for rot, val in (("Nome", caso.nome_cliente or caso.nome_empresa), ("Idade", caso.idade),
+                     ("Cidade/Estado", caso.cidade_estado), ("Profissão informada", caso.profissao_informada),
+                     ("Renda presumida", caso.renda_presumida), ("Registro profissional", caso.registro_profissional)):
+        if (val or "").strip():
+            kyc.append(f"{rot}: {val}")
+    reg = caso.reg_soc_ramo_atividade or caso.reg_soc_razao_social
+    risco = caso.tipo_regiao_risco_2 or caso.tipo_regiao_risco
+    kyc += [f"Registro societário: {sn(caso.registro_societario, reg)}",
+            f"Região de risco: {sn(caso.regiao_risco, risco)}",
+            f"PEP: {sn(caso.pep, ' '.join(x for x in (caso.tipo_pep, caso.descricao_pep) if x))}",
+            f"Mídia negativa: {sn(caso.midia_negativa, caso.midia_negativa_detalhe)}",
+            f"Histórico de PLD: {sn(caso.historico_pld, caso.historico_pld_detalhe)}",
+            f"Histórico de fraude: {sn(caso.historico_fraude, caso.historico_fraude_detalhe)}"]
+    if (caso.outras_info or "").strip():
+        kyc.append("Outras informações relevantes: " + caso.outras_info.replace("\n", "; "))
+
+    mov: List[str] = []
+    if caso.mov_periodo:
+        mov.append(f"Período: {caso.mov_periodo}")
+    for rot, tot, n, lista in (("Créditos", caso.mov_total_credito, caso.mov_total_contrapartes_credito,
+                                caso.contrapartes_credito),
+                               ("Débitos", caso.mov_total_debito, caso.mov_total_contrapartes_debito,
+                                caso.contrapartes_debito)):
+        if tot or lista:
+            mov.append(f"{rot}: {tot or '—'}, {n or len(lista)} contraparte(s), {len(lista)} descrita(s)")
+            for i, cp in enumerate(lista, 1):
+                sin = _cp_sinais(cp)
+                if sin:
+                    mov.append(f"  Contraparte {i}{' — ' + cp.nome if cp.nome else ''} ({rot.lower()}): {sin}")
+    for om in caso.outras_movimentacoes:
+        mov.append(f"Outras movimentações — {om.tipo}: {om.info}")
+
+    comp: List[str] = []
+    t = texto_comportamentos or ""
+    if menciona_fragmentacao(t):
+        comp.append("Fragmentação: Sim (muitas contrapartes, sem concentração)")
+    if menciona_fracionamento(t):
+        comp.append("Fracionamento: Sim (muitas transações por contraparte)")
+    if caso.comp_arredondamento == "Sim":
+        comp.append(f"Arredondamento: Sim, {len(caso.arredondamento_itens)} linha(s)")
+    if caso.comp_pix == "Sim":
+        comp.append(f"Mensagens Pix: Sim, {len(caso.pix_itens)} grupo(s)")
+    if caso.comp_evasao:
+        comp.append(f"Timeline de transferências: {caso.comp_evasao}")
+    if caso.comp_evasao_cripto:
+        comp.append(f"Timeline de criptomoedas: {caso.comp_evasao_cripto}")
+    if (caso.comp_mudanca_comportamento or "").strip():
+        comp.append("Mudança de comportamento: Sim")
+    return [("KYC do cliente", kyc), ("Movimentações", mov), ("Comportamentos", comp)]
 
 
 def faltas_kyc(caso: Caso) -> List[str]:
@@ -1662,6 +1856,8 @@ def extrair_caso_via_ia(tipo_caso: str, fator_gerador: str, data_alerta: str, se
         blocos = None
     dados = extrair_dados_do_texto(resumo, outras_movimentacoes, tipo_caso=tipo_caso, blocos=blocos, **kw)
     aplicar_dados_extraidos(caso, dados, hoje)
+    if blocos is not None:
+        aplicar_kyc_estruturado(caso, kyc)  # linhas "Campo: valor" valem mais que a leitura da IA
     completar_outras_movimentacoes(caso, movimentacoes if blocos is not None else outras_movimentacoes)
     _ajustar_evasao_cripto(caso)
     texto_total = f"{resumo}\n{outras_movimentacoes}"

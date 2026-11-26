@@ -48,6 +48,11 @@ class BaseApp(unittest.TestCase):
         at.button(key=key).click().run()
         self.assertFalse(at.exception, [e.value for e in at.exception])
 
+    def confirmar(self, at):
+        """Passo "O que o Sentinela entendeu": abre o formulário preenchido."""
+        if at.session_state.tela == "preenchimento_ia" and any(b.key == "ia_abrir" for b in at.button):
+            self.clicar(at, "ia_abrir")
+
     def ir_para_formulario(self, at, indice_tipo):
         self.clicar(at, "home_novo")
         self.clicar(at, f"tipo_{indice_tipo}")
@@ -313,6 +318,7 @@ class TestIA(BaseApp):
             at.text_area(key="ia_mov").set_value("Saques de R$90.000,00 em 38 saques.")
             at.run()
             self.clicar(at, "ia_preencher")
+            self.confirmar(at)
             self.assertEqual(at.session_state.tela, "formulario", at.session_state.ia_erro)
             # a IA nunca preenche os campos do analista: continuam os digitados
             self.assertEqual(at.text_input(key="f_fator").value, "Transfer In")
@@ -348,12 +354,53 @@ class TestIA(BaseApp):
             at.text_area(key="ia_comp").set_value("COMP-CCCC arredondamento")
             at.run()
             self.clicar(at, "ia_preencher")
+            self.confirmar(at)
             self.assertEqual(at.session_state.tela, "formulario", at.session_state.ia_erro)
             self.assertEqual(len(fake.requisicoes), 1)
             msg = fake.requisicoes[0][2]["messages"][1]["content"]
             for rotulo in ("INFORMAÇÕES DO KYC DO CLIENTE", "INFORMAÇÕES DAS MOVIMENTAÇÕES DO CLIENTE",
                            "INFORMAÇÕES DOS COMPORTAMENTOS DO CLIENTE"):
                 self.assertIn(rotulo, msg)
+
+    def test_atalhos_de_comportamento_e_tela_de_confirmacao(self):
+        fake = FakeLLM()
+        self.addCleanup(fake.fechar)
+        env = {"ANTHROPIC_API_KEY": "x", "ANTHROPIC_BASE_URL": fake.url, "SENTINELA_LLM_FORMATO": "openai",
+               "SENTINELA_LLM_MODELO": "fake"}
+        with mock.patch.dict(os.environ, env):
+            at = self.app()
+            self.clicar(at, "home_novo")
+            self.clicar(at, "tipo_0")
+            self.clicar(at, "modo_auto")
+            at.text_input(key="ia_fator").set_value("Transfer In")
+            at.text_area(key="ia_sentenca").set_value("Alerta.")
+            at.text_area(key="ia_kyc").set_value("Nome: Ana Lima\nIdade: 30 anos\nPEP: não")
+            at.checkbox(key="ia_at_fragmentacao").set_value(True)
+            at.selectbox(key="ia_evasao").set_value("Só Créditos (Sem Débitos)")
+            at.run()
+            self.clicar(at, "ia_preencher")
+            # as frases dos atalhos vão na caixa de Comportamentos enviada à IA
+            msg = fake.requisicoes[0][2]["messages"][1]["content"]
+            self.assertIn("Houve fragmentação.", msg)
+            self.assertIn("Só créditos, sem débitos.", msg)
+            # confirmação: ainda na tela, mostrando o que foi entendido, sem abrir o formulário
+            self.assertEqual(at.session_state.tela, "preenchimento_ia")
+            self.assertTrue(any(b.key == "ia_abrir" for b in at.button))
+            texto = " ".join(e.proto.body for e in at.get("html"))
+            self.assertIn("Nome: Ana Lima", texto)
+            self.assertIn("Idade: 30", texto)
+            self.assertIn("PEP: Não", texto)
+            self.assertIn("Fragmentação: Sim", texto)
+            self.assertIn("Só Créditos", texto)
+            # voltar e editar mantém o texto e volta ao botão de preencher
+            self.clicar(at, "ia_editar")
+            self.assertTrue(any(b.key == "ia_preencher" for b in at.button))
+            self.assertEqual(at.text_area(key="ia_kyc").value, "Nome: Ana Lima\nIdade: 30 anos\nPEP: não")
+            self.clicar(at, "ia_preencher")
+            self.clicar(at, "ia_abrir")
+            self.assertEqual(at.session_state.tela, "formulario", at.session_state.ia_erro)
+            self.assertEqual(at.text_input(key="f_nome").value, "Ana Lima")
+            self.assertEqual(at.selectbox(key="f_evasao").value, "Só Créditos (Sem Débitos)")
 
     def test_erro_da_ia_aparece_na_tela(self):
         fake = FakeLLM()
@@ -649,6 +696,7 @@ class TestTimelineCriptoNoFormulario(BaseApp):
             at.text_area(key="ia_mov").set_value("Cripto: R$300.000,00, enviou em seguida.")
             at.run()
             self.clicar(at, "ia_preencher")
+            self.confirmar(at)
             self.assertEqual(at.session_state.tela, "formulario", at.session_state.ia_erro)
             self.assertEqual(at.selectbox(key="f_evasao_cripto").value, "Rápida Evasão")
 
@@ -688,6 +736,7 @@ class TestIAPerguntasKYC(BaseApp):
             at.text_input(key="ia_kyc_midia_negativa_detalhe").set_value("g1.com/x, 10/05/2026, G1")
             at.run()
             self.clicar(at, "ia_preencher")
+            self.confirmar(at)
             self.assertEqual(at.session_state.tela, "formulario", at.session_state.ia_erro)
             self.assertEqual(at.text_input(key="f_cidade").value, "Tabatinga/AM")
             self.assertEqual(at.selectbox(key="f_regiao").value, "Sim")
@@ -720,6 +769,7 @@ class TestIAPerguntasKYC(BaseApp):
             at.text_input(key="ia_kyc_cp__cred__1__pep_detalhe").set_value("Secretária estadual")
             at.run()
             self.clicar(at, "ia_preencher")
+            self.confirmar(at)
             self.assertEqual(at.session_state.tela, "formulario", at.session_state.ia_erro)
             rids = at.session_state["L_cred"]
             self.assertEqual(len(rids), 2)
@@ -753,6 +803,7 @@ class TestIAPerguntasKYC(BaseApp):
             at.text_input(key="ia_kyc_so__0__descricao_pep").set_value("Vereadora")
             at.run()
             self.clicar(at, "ia_preencher")
+            self.confirmar(at)
             self.assertEqual(at.session_state.tela, "formulario", at.session_state.ia_erro)
             self.assertEqual(at.selectbox(key="f_pres_online").value, "Sim")
             self.assertEqual(at.selectbox(key="f_fachada").value, "Sim")
@@ -791,6 +842,7 @@ class TestIAPerguntasKYC(BaseApp):
                 at.text_input(key="ia_kyc_cp__cred__0__pep_detalhe").set_value("Vereador")
                 at.run()
                 self.clicar(at, "ia_preencher")
+                self.confirmar(at)
                 self.assertEqual(at.session_state.tela, "formulario", at.session_state.ia_erro)
                 self.assertEqual(len(at.text_area(key="f_mudanca").value.splitlines()), 6)
 
@@ -821,6 +873,7 @@ class TestIAPerguntasKYC(BaseApp):
             at.text_area(key="ia_kyc").set_value("Movimentou R$1.000,00. Preencha apenas o que eu informei.")
             at.run()
             self.clicar(at, "ia_preencher")
+            self.confirmar(at)
             self.assertEqual(at.session_state.tela, "formulario", at.session_state.ia_erro)
             self.assertEqual(at.text_input(key="f_nome").value, "")  # sem marcador "Não informado"
             self.assertEqual(at.text_input(key="f_renda").value, "")
@@ -849,6 +902,7 @@ class TestIAPerguntasKYC(BaseApp):
             at.text_area(key="ia_kyc").set_value("Ana, tudo informado.")
             at.run()
             self.clicar(at, "ia_preencher")
+            self.confirmar(at)
             self.assertEqual(at.session_state.tela, "formulario", at.session_state.ia_erro)
 
 

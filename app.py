@@ -18,6 +18,7 @@ Ver README.md para publicar no Databricks.
 
 from __future__ import annotations
 
+import html
 from datetime import date, datetime
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -73,6 +74,7 @@ DEFAULTS: Dict[str, Any] = {
     "ia_avisos": [],
     "ia_erro": "",
     "ia_pendente": None,
+    "ia_confirmar": None,
     "origem_ia": False,
     "sql_pendente": None,
     "sql_resultado": None,
@@ -111,6 +113,7 @@ def limpar_formulario() -> None:
     ss.gerado_numero = None
     ss.ia_avisos = []
     ss.ia_pendente = None
+    ss.ia_confirmar = None
     ss.origem_ia = False
     ss.sql_pendente = None
     ss.sql_resultado = None
@@ -419,6 +422,7 @@ def _concluir_ia(caso: Caso, avisos: List[str]) -> None:
     ia.completar_obrigatorios(caso)
     ss.ia_erro = ""
     ss.ia_pendente = None
+    ss.ia_confirmar = None
     carregar_caso_no_formulario(caso)
     ss.ia_avisos = avisos
     ss.origem_ia = True
@@ -427,12 +431,35 @@ def _concluir_ia(caso: Caso, avisos: List[str]) -> None:
 
 def _refazer_ia() -> None:
     ss.ia_pendente = None
+    ss.ia_confirmar = None
     ss.ia_erro = ""
+
+
+def _atalhos_ligados() -> List[str]:
+    return [k for k in ia.ATALHOS_COMPORTAMENTO if ss.get(f"ia_at_{k}")]
+
+
+def _comp_ia() -> str:
+    """Caixa de Comportamentos + marcadores ligados + modo de evasão escolhido."""
+    return ia.texto_com_atalhos(_txt("ia_comp"), _atalhos_ligados(), ss.get("ia_evasao") or "")
 
 
 def _texto_ia() -> str:
     """Os três textos do preenchimento automático juntos (para detectar, por exemplo, mudança de comportamento)."""
-    return "\n".join(_txt(k) for k in ("ia_kyc", "ia_mov", "ia_comp") if _txt(k))
+    return "\n".join(t for t in (_txt("ia_kyc"), _txt("ia_mov"), _comp_ia()) if t)
+
+
+def _para_confirmacao(caso: Caso, avisos: List[str]) -> None:
+    """Última etapa antes do formulário: mostra o que o Sentinela entendeu para o analista conferir."""
+    ss.ia_erro = ""
+    ss.ia_pendente = None
+    ss.ia_confirmar = {"caso": caso, "avisos": avisos, "comp": _comp_ia()}
+
+
+def _abrir_formulario_ia() -> None:
+    conf = ss.get("ia_confirmar")
+    if conf:
+        _concluir_ia(conf["caso"], conf["avisos"])
 
 
 def _preencher_com_ia() -> None:
@@ -445,7 +472,7 @@ def _preencher_com_ia() -> None:
             ss.ia_erro = "Preencha: " + "; ".join(
                 f"{ia.grupo_kyc(caso, k)}: {ia.rotulo_kyc(caso, k)[0]}" for k in faltas) + "."
             return
-        _concluir_ia(caso, pend["avisos"])
+        _para_confirmacao(caso, pend["avisos"])
         return
     erros = []
     if not _txt("ia_fator"):
@@ -454,7 +481,7 @@ def _preencher_com_ia() -> None:
         erros.append("Data do alerta")
     if not _txt("ia_sentenca"):
         erros.append("Sentença")
-    if not (_txt("ia_kyc") or _txt("ia_mov") or _txt("ia_comp")):
+    if not (_txt("ia_kyc") or _txt("ia_mov") or _comp_ia()):
         erros.append("pelo menos uma das informações (KYC, Movimentações ou Comportamentos)")
     mudanca = None
     if ia.menciona_mudanca_comportamento(_texto_ia()):
@@ -468,7 +495,7 @@ def _preencher_com_ia() -> None:
         caso, avisos = ia.extrair_caso_via_ia(
             tipo_caso=ss.tipo_caso_novo or TIPOS_CASO[0],
             fator_gerador=_txt("ia_fator"), data_alerta=_txt("ia_data"), sentenca=_txt("ia_sentenca"),
-            kyc=_txt("ia_kyc"), movimentacoes=_txt("ia_mov"), comportamentos=_txt("ia_comp"), mudanca=mudanca)
+            kyc=_txt("ia_kyc"), movimentacoes=_txt("ia_mov"), comportamentos=_comp_ia(), mudanca=mudanca)
     except ia.ErroExtracaoIA as e:
         ss.ia_erro = str(e)
         return
@@ -478,11 +505,13 @@ def _preencher_com_ia() -> None:
     ia.zerar_sinais_nao_mencionados(caso, _texto_ia())
     ia.zerar_sinais_contrapartes(caso, _texto_ia())
     ia.marcar_sinais_do_texto_kyc(caso, _txt("ia_kyc"))
+    if ss.get("ia_evasao"):
+        caso.comp_evasao = ss.ia_evasao  # o modo escolhido no marcador vale mais que a leitura da IA
     if ia.faltas_kyc(caso):
         ss.ia_erro = ""
         ss.ia_pendente = {"caso": caso, "avisos": avisos}
         return
-    _concluir_ia(caso, avisos)
+    _para_confirmacao(caso, avisos)
 
 
 def _painel_kyc_pendente(caso: Caso) -> None:
@@ -511,9 +540,25 @@ def _painel_kyc_pendente(caso: Caso) -> None:
             campo(rotulo, f"ia_kyc_{chave}", obrig=True, ph=dica or None)
 
 
+def _painel_entendido(conf: Dict[str, Any]) -> None:
+    """"O que o Sentinela entendeu": resumo do que vai para o formulário, para o analista conferir."""
+    estilo.dica("<b>O que o Sentinela entendeu.</b> Confira abaixo. Se estiver certo, abra o formulário; se algo "
+                "estiver errado, volte e edite o texto. Depois você ainda revisa o formulário inteiro.")
+    for secao, linhas in ia.resumo_entendido(conf["caso"], conf["comp"]):
+        estilo.subtitulo(secao)
+        if not linhas:
+            st.caption("Nada informado nesta parte.")
+        if linhas:
+            itens = "".join(f"<li>{html.escape(x.strip())}</li>" for x in linhas)
+            st.html(f"<ul style='text-align:left;margin:4px 0 10px 18px;padding:0;line-height:1.5'>{itens}</ul>")
+    for aviso in conf["avisos"]:
+        st.caption("⚠ " + aviso)
+
+
 def tela_preenchimento_ia() -> None:
     pend = ss.get("ia_pendente")
-    bloq = bool(pend)
+    conf = ss.get("ia_confirmar")
+    bloq = bool(pend) or bool(conf)
     estilo.titulo_cartao("Preenchimento com instruções", "DESCREVA O CASO", pequeno=True)
     campo("Nome do alerta", "ia_fator", obrig=True, desabilitado=bloq)
     campo("Data do alerta", "ia_data", padrao=formatar_data_br(date.today()), obrig=True, desabilitado=bloq)
@@ -538,6 +583,13 @@ def tela_preenchimento_ia() -> None:
     estilo.dica("Nas Movimentações, descreva também as movimentações que <b>não</b> sejam transferências bancárias "
                 "comuns (ex: saques, boletos, gastos no cartão, empréstimos, criptomoedas, investimentos). Elas "
                 "alimentam o campo \"Outras Movimentações\" do Resumo de Movimentações.")
+    estilo.dica("<b>Atalhos de comportamento:</b> marque o que vale para o caso, sem precisar digitar. Se você "
+                "escrever o mesmo na caixa abaixo, também vale.")
+    ca, cb = st.columns(2)
+    for i, (chave, (rotulo, _)) in enumerate(ia.ATALHOS_COMPORTAMENTO.items()):
+        (ca if i % 2 == 0 else cb).checkbox(rotulo, key=f"ia_at_{chave}", disabled=bloq)
+    escolha("Timeline de transferências (opcional)", "ia_evasao", [""] + list(ia.FRASES_EVASAO), padrao="",
+            desabilitado=bloq)
     campo("Informações dos Comportamentos do cliente", "ia_comp", area=True, altura=130, desabilitado=bloq)
     if ia.menciona_mudanca_comportamento(_texto_ia()):
         estilo.dica("<b>Você citou mudança de comportamento.</b> As movimentações serão descritas em 6 meses: o "
@@ -549,6 +601,12 @@ def tela_preenchimento_ia() -> None:
         campo("Abertura da conta e/ou último reporte", "ia_mc_conta", obrig=True, ph="DD/MM/AAAA", container=v2, desabilitado=bloq)
     if pend:
         _painel_kyc_pendente(pend["caso"])
+    if conf:
+        _painel_entendido(conf)
+        st.button("Abrir formulário preenchido", key="ia_abrir", type="primary", on_click=_abrir_formulario_ia)
+        botao_link("Voltar e editar", key="ia_editar", on_click=_refazer_ia)
+        botao_link("← Voltar", key="ia_voltar", on_click=lambda: (_refazer_ia(), ir_para("modo_preenchimento")))
+        return
     if ss.ia_erro:
         estilo.msg_erro(ss.ia_erro)
     with st.spinner("Chamando a IA para preencher o formulário…"):

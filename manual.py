@@ -33,22 +33,40 @@ deixar o Sentinela preencher por você. Em qualquer um dos dois jeitos, <b>dê u
 antes de gerar o dossiê, combinado?</p>
 
 <h3>1. Como o Sentinela funciona: as telas</h3>
-<table>
-<tr><th>Tela</th><th>O que rola por lá</th></tr>
-<tr><td><b>Home</b></td><td>Daqui você começa um <b>novo caso</b>, abre o <b>Banco de dossiês</b>, chega neste manual ou manda feedback.</td></tr>
-<tr><td><b>Tipo de caso</b> (etapa 1)</td><td>PF, PJ, Cripto, NuInvest ou Under 18. O tipo muda alguns campos: a PJ pede empresa e sócios, e o Under 18 pede o responsável legal.</td></tr>
-<tr><td><b>Modo</b> (etapa 2)</td><td>Você escolhe: <b>Preencher com instruções</b> (automático) ou <b>Preencher manualmente</b>.</td></tr>
-<tr><td><b>Preenchimento por instruções</b></td><td>Você digita <b>Nome do alerta</b>, <b>Data</b> e <b>Sentença</b> (esses o automático nunca mexe) e conta o caso em <b>três caixas</b>: KYC, Movimentações e Comportamentos. Se faltar algum detalhe de KYC ou da mudança de comportamento, o Sentinela te pergunta. Depois ele abre o formulário já preenchido.</td></tr>
-<tr><td><b>Formulário</b></td><td><b>Bloco 1</b> Alerta/Sentença · <b>Bloco 2</b> KYC (e <b>2.1</b> sócios, só PJ) · <b>Bloco 3</b> Resumo de movimentações (totais, contrapartes, outras movimentações) · <b>Bloco 4</b> Thundera AML 360 (arredondamento, Pix, timeline, mudança de comportamento). Os campos com ★ são obrigatórios. No fim tem o botão <b>Gerar dossiê do caso</b>.</td></tr>
-<tr><td><b>Dossiê</b></td><td>Tem três abas: <b>Informações do Caso</b> (só o que foi preenchido, sem classificar risco), <b>Resolução do Caso</b> (parecer, diligência e, no Cripto, os Anexos) e <b>Avaliação de Qualidade</b>. Dá pra baixar o PDF de cada aba ou o <b>PDF completo</b>.</td></tr>
-<tr><td><b>Banco de dossiês</b></td><td>Procure pelo número do caso ou clique em <b>Consultar banco de dados completo</b> pra ver todos os dossiês salvos e abrir o que quiser.</td></tr>
-</table>
+<p>Tudo começa na <b>Home</b>. Dela você inicia um <b>novo caso</b>, abre o <b>Banco de dossiês</b>, chega neste
+manual ou manda um feedback.</p>
+
+<p>Ao iniciar um caso, são duas escolhas rápidas. Na <b>etapa 1</b> você diz o <b>tipo de caso</b>: PF, PJ, Cripto,
+NuInvest ou Under 18. O tipo muda alguns campos do formulário: a PJ pede empresa e sócios, e o Under 18 pede o
+responsável legal. Na <b>etapa 2</b> você escolhe como preencher: <b>com instruções</b> (automático) ou
+<b>manualmente</b>.</p>
+
+<p>No <b>preenchimento por instruções</b>, você digita o <b>Nome do alerta</b>, a <b>Data</b> e a <b>Sentença</b>
+(esses o automático nunca mexe) e conta o caso em <b>três caixas</b>: KYC, Movimentações e Comportamentos. Se faltar
+algum detalhe de KYC ou da mudança de comportamento, o Sentinela te pergunta. Antes de abrir o formulário, ele mostra
+uma tela <b>"O que o Sentinela entendeu"</b>, com um resumo do que vai ser preenchido: você confere e clica em
+<b>Abrir formulário preenchido</b> (ou em <b>Voltar e editar</b>, se algo estiver errado).</p>
+
+<p>O <b>formulário</b> é dividido em blocos. O <b>Bloco 1</b> é o Alerta/Sentença. O <b>Bloco 2</b> é o KYC
+(e o <b>2.1</b> traz os sócios, só na PJ). O <b>Bloco 3</b> é o Resumo de movimentações, com totais, contrapartes e
+outras movimentações. O <b>Bloco 4</b> é o Thundera AML 360, com arredondamento, Pix, timeline e mudança de
+comportamento. Os campos com ★ são obrigatórios, e no fim tem o botão <b>Gerar dossiê do caso</b>.</p>
+
+<p>Com o dossiê pronto, ele abre em <b>três abas</b>. <b>Informações do Caso</b> mostra só o que foi preenchido, sem
+classificar risco. <b>Resolução do Caso</b> é onde ficam o parecer, a diligência e, no Cripto, os Anexos.
+<b>Avaliação de Qualidade</b> fecha o trio. Dá pra baixar o PDF de cada aba ou o <b>PDF completo</b>.</p>
+
+<p>Precisou rever um caso antigo? No <b>Banco de dossiês</b> você procura pelo número do caso ou clica em
+<b>Consultar banco de dados completo</b> pra ver todos os dossiês salvos e abrir o que quiser.</p>
 <p>Campo sem informação fica <b>em branco</b> e <b>não aparece no dossiê</b>. Nos casos NuInvest, Crypto e outras
 análises, o que não tem campo no KYC padrão vai em <b>Outras informações relevantes</b> (uma informação por linha, no
 formato <code>Rótulo: valor</code>).</p>
 
 <h3>2. Comportamentos que o Sentinela entende, com comandos rápidos</h3>
-<p>Escreva na caixa <b>Informações dos Comportamentos</b>. Veja o que cada frase faz:</p>
+<p>Os comportamentos mais comuns têm <b>atalhos</b>: em cima da caixa de Comportamentos, é só <b>marcar</b>
+Fragmentação, Fracionamento, Arredondamento diverso ou Mudança de comportamento, e escolher a
+<b>Timeline de transferências</b> (Rápida Evasão, Só Créditos etc.). Sem digitar nada. Se preferir escrever, a caixa
+<b>Informações dos Comportamentos</b> entende estas frases, e o efeito é o mesmo:</p>
 <table>
 <tr><th>Comando rápido (exemplo)</th><th>O que o Sentinela preenche pra você</th></tr>
 <tr><td><code>Houve fragmentação nos créditos.</code></td><td>Total alto de contrapartes (60 a 200 ou o número informado), sem concentração: percentuais baixos e diferentes.</td></tr>
@@ -65,7 +83,9 @@ formato <code>Rótulo: valor</code>).</p>
 </table>
 
 <h3>3. Informações de KYC: comandos rápidos</h3>
-<p>Escreva na caixa <b>Informações do KYC</b>, <b>uma informação por linha</b>. Cada dado cai no seu campo:</p>
+<p>Escreva na caixa <b>Informações do KYC</b>, <b>uma informação por linha</b>, no formato <code>Campo: valor</code>.
+O Sentinela lê essas linhas direto e coloca cada dado no seu campo, sem depender da IA. Linhas em texto livre
+também funcionam, mas o formato <code>Campo: valor</code> é o mais certeiro:</p>
 <pre>Nome: Carlos Eduardo Mendes
 Idade: 42 anos
 Cidade/Estado: Foz do Iguaçu/PR
@@ -83,6 +103,7 @@ Renda presumida: R$ 3.500,00</pre>
 <tr><td><code>Compartilha dispositivo com outra conta</code></td><td>Qualquer outra informação vai para <b>Outras informações relevantes</b>.</td></tr>
 </table>
 <ul>
+<li><b>Campos que ele reconhece:</b> Nome, Idade, Cidade/Estado, Profissão informada, Registro profissional, Renda presumida, Registro societário, Região de risco, PEP, Mídia negativa, Histórico de PLD (ou COAF), Histórico de fraude e Outras informações. Para dizer que não tem, escreva <code>PEP: não</code>.</li>
 <li><b>Não falou, fica "Não".</b> Região de risco, PEP, mídia negativa, histórico de PLD e de fraude só viram "Sim" se você mencionar (e "não é PEP", por exemplo, não conta como menção).</li>
 <li><b>Citou mas esqueceu o detalhe?</b> Escreva a informação na mesma linha. Se não escrever, o Sentinela abre um campinho pra você completar.</li>
 <li><b>Sem dados?</b> Escreva "preencha com dados aleatórios" e ele cria cada informação no campo certo.</li>

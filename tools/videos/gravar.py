@@ -135,6 +135,14 @@ def rolar_ate(page, texto, extra=0):
     esperar(page, 800)
 
 
+def confirmar_e_abrir(page, g, legenda="O Sentinela mostra o que entendeu. Confira e abra o formulário."):
+    aparece(page, "O que o Sentinela entendeu")
+    page.get_by_text("O que o Sentinela entendeu").first.scroll_into_view_if_needed()
+    esperar(page, 900)
+    g.snap(legenda, 3.0)
+    clicar(page, "Abrir formulário preenchido")
+
+
 def cena_inicio(p):
     page = p.new_page()
     g = Gravador(page)
@@ -169,6 +177,7 @@ def cena_kyc(p):
         esperar(page, 800)
     g.snap('Marque "pode preencher aleatoriamente" para o Sentinela criar esses dados, ou digite os seus.', 2.4)
     clicar(page, "Preencher automaticamente|Continuar")
+    confirmar_e_abrir(page, g)
     aparece(page, "KYC - Know Your Customer")
     rolar_ate(page, "KYC - Know Your Customer")
     g.snap("O formulário abre preenchido: revise o Bloco 2 (KYC).", 2.2)
@@ -201,6 +210,7 @@ def cena_mov(p):
     digitar(page, re.compile(r"^PEP"), "PEP Titular: vereador de Recife, carência até 2028")
     g.snap("Escreva a informação no campo pequeno e clique em Continuar.", 2.0)
     clicar(page, "Preencher automaticamente|Continuar")
+    confirmar_e_abrir(page, g)
     aparece(page, "Resumo de movimentações")
     rolar_ate(page, "Resumo de movimentações")
     g.snap("Bloco 3: período e totais preenchidos.", 2.2)
@@ -219,20 +229,31 @@ def cena_comp(p):
     g = Gravador(page, aviso_ia=True)
     ate_tela_ia(page)
     alerta(page)
-    page.get_by_label("Informações dos Comportamentos do cliente").scroll_into_view_if_needed()
+    page.get_by_text("Atalhos de comportamento").first.scroll_into_view_if_needed()
+    esperar(page, 600)
+    g.snap("Atalhos: marque o comportamento do caso, sem digitar.", 2.2)
+    for rotulo, legenda in (("Fragmentação", "Fragmentação: muitas contrapartes, sem concentração."),
+                            ("Arredondamento diverso", "Arredondamento diverso: várias linhas por valor."),
+                            ("Mudança de comportamento", "Mudança de comportamento: o Sentinela monta a narrativa.")):
+        page.get_by_text(rotulo, exact=True).first.click()
+        esperar(page, 800)
+        g.snap(legenda, 1.8)
+    page.get_by_label("Timeline de transferências (opcional)").click()
     esperar(page, 500)
-    escrever(page, g, "Informações dos Comportamentos do cliente", COMP_TXT, {
-        0: "Comportamentos: fragmentação e transações arredondadas.",
-        1: "Pix com mensagens e rápida evasão dos valores recebidos.",
-        2: 'Escreva "houve mudança de comportamento" para o Sentinela montar a narrativa.',
-    })
+    page.get_by_role("option", name="Rápida Evasão", exact=True).click()
+    esperar(page, 800)
+    g.snap("Escolha também a Timeline de transferências (Rápida Evasão, Só Créditos...).", 2.2)
+    page.get_by_label("Informações dos Comportamentos do cliente").scroll_into_view_if_needed()
+    digitar(page, "Informações dos Comportamentos do cliente",
+            'Pix com mensagens como "pagamento mercadoria" e "ajuda".', area=True)
+    g.snap("O que não tem atalho (como as mensagens de Pix), escreva na caixa.", 2.4)
     aparece(page, "Abertura da conta", 15000)
     page.get_by_label("Abertura da conta").scroll_into_view_if_needed()
     esperar(page, 500)
-    g.snap("Aparecem campos extras: informe a abertura da conta (antes da data do alerta).", 2.4)
+    g.snap("Na mudança de comportamento, informe a abertura da conta (antes da data do alerta).", 2.4)
     digitar(page, "Abertura da conta", "10/01/2025")
-    g.snap("O valor do mês da mudança é opcional. Sem ele, o Sentinela cria um valor.", 2.0)
     clicar(page, "Preencher automaticamente|Continuar")
+    confirmar_e_abrir(page, g)
     aparece(page, "Resumo de movimentações")
     rolar_ate(page, "Thundera")
     g.snap("Bloco 4: Thundera / AML 360 preenchido.", 2.2)
@@ -265,6 +286,7 @@ def cena_final(p):
         esperar(page, 700)
     digitar(page, re.compile(r"^PEP"), "PEP Titular: vereador de Recife, carência até 2028")
     clicar(page, "Preencher automaticamente|Continuar")
+    confirmar_e_abrir(page, g)
     aparece(page, "KYC - Know Your Customer")
     page.evaluate("window.scrollTo(0, 0)")
     esperar(page, 700)

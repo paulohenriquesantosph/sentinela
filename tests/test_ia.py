@@ -1520,3 +1520,73 @@ class OutrasMovimentacoesDoTextoTests(unittest.TestCase):
 
     def test_sem_termos_nao_cria_nada(self):
         self.assertEqual(ia.outras_movimentacoes_do_texto("Recebeu Pix de várias pessoas"), [])
+
+
+class KycEstruturadoEAtalhosTests(unittest.TestCase):
+    def _caso(self, tipo="Pessoa Física (PF)"):
+        from core import Caso
+        return Caso(numero_caso="X1", tipo_caso=tipo)
+
+    def test_campo_valor_vai_direto_para_o_campo(self):
+        caso = self._caso()
+        ia.aplicar_kyc_estruturado(caso, "\n".join([
+            "Nome: Carlos Mendes", "Idade: 42 anos", "Cidade/Estado: Foz do Iguaçu/PR",
+            "Profissão informada: Comerciante", "Registro profissional: sem registro profissional",
+            "Renda presumida: R$ 3.500,00",
+            "Registro societário: sócio de empresa do ramo de Serviços Combinados de Escritório",
+            "Região de risco: fronteira com o Paraguai",
+            "PEP relacionado: irmão de vereador, carência até 2027",
+            "Mídia negativa: contrabando, G1, 10/03/2025", "Histórico de PLD: reporte ao COAF em 2024",
+            "Fraude: conta cancelada em 2023", "Outras informações: compartilha dispositivo"]))
+        self.assertEqual((caso.nome_cliente, caso.idade, caso.cidade_estado, caso.profissao_informada),
+                         ("Carlos Mendes", "42", "Foz do Iguaçu/PR", "Comerciante"))
+        self.assertEqual(caso.renda_presumida, "R$3.500,00")
+        self.assertEqual((caso.registro_societario, caso.reg_soc_ramo_atividade),
+                         ("Sim", "Serviços Combinados de Escritório"))
+        self.assertEqual((caso.regiao_risco, caso.tipo_regiao_risco), ("Sim", "Região de Fronteira"))
+        self.assertEqual((caso.pep, caso.tipo_pep), ("Sim", "PEP Relacionado"))
+        self.assertIn("vereador", caso.descricao_pep)
+        self.assertEqual((caso.midia_negativa, caso.historico_pld, caso.historico_fraude), ("Sim", "Sim", "Sim"))
+        self.assertIn("COAF", caso.historico_pld_detalhe)
+        self.assertEqual(caso.outras_info, "compartilha dispositivo")
+
+    def test_negacao_e_linhas_sem_campo(self):
+        caso = self._caso()
+        feitos = ia.aplicar_kyc_estruturado(caso, "PEP: não\nMídia negativa: nenhuma\nCliente tranquilo, sem pendências")
+        self.assertEqual(feitos, ["pep", "midia"])
+        self.assertEqual((caso.pep, caso.midia_negativa), ("Não", "Não"))
+        ia.marcar_sinais_do_texto_kyc(caso, "PEP: não\nMídia negativa: nenhuma")
+        self.assertEqual((caso.pep, caso.midia_negativa), ("Não", "Não"))
+
+    def test_pj_nao_usa_o_formato_estruturado(self):
+        from core import TIPO_PJ
+        caso = self._caso(TIPO_PJ)
+        self.assertEqual(ia.aplicar_kyc_estruturado(caso, "Nome: Empresa X\nIdade: 5"), [])
+
+    def test_atalhos_viram_frases_que_o_sentinela_ja_entende(self):
+        t = ia.texto_com_atalhos("Pix com mensagem ajuda", ["fragmentacao", "fracionamento", "mudanca"],
+                                 "Rápida Evasão")
+        self.assertTrue(ia.menciona_fragmentacao(t) and ia.menciona_fracionamento(t))
+        self.assertTrue(ia.menciona_mudanca_comportamento(t))
+        self.assertIn("Pix com mensagem ajuda", t)
+        self.assertEqual(ia.texto_com_atalhos("", [], ""), "")
+        self.assertIn("Diversas transações arredondadas", ia.texto_com_atalhos("", ["arredondamento"]))
+        self.assertTrue(ia.menciona_arredondamento_diverso(ia.texto_com_atalhos("", ["arredondamento"])))
+
+    def test_resumo_do_que_foi_entendido(self):
+        from core import ContraparteMovimentacao, OutraMovimentacao
+        caso = self._caso()
+        caso.nome_cliente, caso.pep, caso.tipo_pep = "Ana", "Sim", "PEP Titular"
+        caso.mov_periodo = "01/01/2026 até 30/06/2026"
+        caso.mov_total_credito = "R$450.000,00"
+        caso.contrapartes_credito = [ContraparteMovimentacao(nome="Beto", pep="Sim")]
+        caso.outras_movimentacoes = [OutraMovimentacao(tipo="Saques", info="R$ 15.000,00")]
+        caso.comp_evasao = "Rápida Evasão"
+        r = dict(ia.resumo_entendido(caso, "Houve fragmentação."))
+        self.assertIn("Nome: Ana", r["KYC do cliente"])
+        self.assertTrue(any(x.startswith("PEP: Sim") for x in r["KYC do cliente"]))
+        self.assertIn("Mídia negativa: Não", r["KYC do cliente"])
+        self.assertTrue(any("Contraparte 1 — Beto" in x and "PEP" in x for x in r["Movimentações"]))
+        self.assertIn("Outras movimentações — Saques: R$ 15.000,00", r["Movimentações"])
+        self.assertTrue(any(x.startswith("Fragmentação: Sim") for x in r["Comportamentos"]))
+        self.assertIn("Timeline de transferências: Rápida Evasão", r["Comportamentos"])
